@@ -7,14 +7,16 @@ from pydub import AudioSegment
 import json
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+import io  # 환경변수에서 JSON 키 읽을 때 필요
 
-# ✅ Google Sheets 설정 (환경변수에서 읽기)
+# ✅ Google Sheets 설정 (환경변수에서 credentials 읽기)
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 json_key_str = os.getenv("GOOGLE_CREDENTIALS_JSON")
-json_key_dict = json.loads(json_key_str) if json_key_str else None
-credentials = ServiceAccountCredentials.from_json_keyfile_dict(json_key_dict, scope)
+credentials = ServiceAccountCredentials.from_json_keyfile_dict(
+    json.loads(json_key_str)
+) if json_key_str else None
 gc = gspread.authorize(credentials)
-sheet = gc.open_by_url("https://docs.google.com/spreadsheets/d/1z7UMcBJLtDSeTq2-fake-link/edit#gid=0").sheet1
+sheet = gc.open_by_url("https://docs.google.com/spreadsheets/d/1z7UMcBJLtDSeTq2-fake-link/edit#gid=0").sheet1  # ⚠️ 시트 URL 필요시 수정
 
 # ✅ 허용된 사용자 목록
 google_sheet_whitelist = {
@@ -31,7 +33,7 @@ survey_questions = [
     ("target", "📘 배우고 싶은 언어는 무엇인가요? (Which language would you like to learn?)"),
     ("age", "📅 나이대가 어떻게 되나요? (What is your age group?)"),
     ("gender", "👤 성별이 어떻게 되시나요? (남성/여성)"),
-    ("level", "📊 현재 실력은 어느정도인가요? (예: 초급, 중급, 고급 또는 설명으로) (Your level: beginner/intermediate/advanced?)")
+    ("level", "📊 현재 실력은 어느정도인가요? (예: 초급, 중급, 고급 또는 설명으로)")
 ]
 
 language_explanation = {
@@ -87,10 +89,8 @@ async def ask_next_question(update, user_id):
         if company not in google_sheet_whitelist or teacher not in google_sheet_whitelist[company]:
             await update.message.reply_text("❌ 등록되지 않은 사용자입니다. 관리자에게 문의해주세요.")
             return
-
         row = [profile.get(k, "") for k, _ in survey_questions]
         sheet.append_row(row)
-
         await update.message.reply_text("✅ 설문 완료! 이제 수업을 시작할게요 형님.")
         del user_states[user_id]
         await tutor_response("수업을 시작하자", update, profile)
@@ -98,7 +98,6 @@ async def ask_next_question(update, user_id):
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
-
     if user_id in user_states:
         state = user_states[user_id]
         key, _ = survey_questions[state]
@@ -123,22 +122,18 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_profiles[user_id] = {}
         await ask_next_question(update, user_id)
         return
-
     file = await context.bot.get_file(update.message.voice.file_id)
     ogg_path = "voice.ogg"
     mp3_path = "voice.mp3"
     await file.download_to_drive(ogg_path)
     AudioSegment.from_ogg(ogg_path).export(mp3_path, format="mp3")
-
     with open(mp3_path, "rb") as f:
         transcript = openai.audio.transcriptions.create(model="whisper-1", file=f)
-
     await tutor_response(transcript.text, update, user_profiles[user_id])
 
 async def tutor_response(user_input: str, update: Update, profile: dict):
     try:
         system_prompt = get_system_prompt(profile)
-
         response = openai.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
@@ -148,7 +143,6 @@ async def tutor_response(user_input: str, update: Update, profile: dict):
         )
         reply = response.choices[0].message.content
         await update.message.reply_text(reply)
-
         speech = openai.audio.speech.create(
             model="tts-1",
             voice="nova",
@@ -157,9 +151,7 @@ async def tutor_response(user_input: str, update: Update, profile: dict):
         tts_path = "response.mp3"
         with open(tts_path, "wb") as f:
             f.write(speech.content)
-
         await update.message.reply_voice(voice=open(tts_path, "rb"))
-
     except Exception as e:
         await update.message.reply_text(f"❌ 오류 발생: {str(e)}")
 
