@@ -4,6 +4,8 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 import requests
 from pydub import AudioSegment
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
@@ -46,6 +48,27 @@ Today's topic: weather expressions in {profile['target']}.
 {explanation}
 """
 
+# 스프레드시트 접근 함수
+def get_sheet():
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+    client = gspread.authorize(creds)
+    sheet = client.open("CC4AI 튜터 설문지").sheet1
+    return sheet
+
+# 설문 결과 저장 함수
+def save_survey_to_sheet(profile: dict):
+    sheet = get_sheet()
+    sheet.append_row([
+        profile.get("company", ""),
+        profile.get("teacher", ""),
+        profile.get("native", ""),
+        profile.get("target", ""),
+        profile.get("age", ""),
+        profile.get("gender", ""),
+        profile.get("level", "")
+    ])
+
 # 설문지 흐름
 survey_questions = [
     ("company", "🏢 회사명 (Your company name)?"),
@@ -73,6 +96,7 @@ async def ask_next_question(update, user_id):
         await update.message.reply_text(question)
     else:
         await update.message.reply_text("✅ 설문 완료! 수업을 시작합니다.")
+        save_survey_to_sheet(user_profiles[user_id])
         del user_states[user_id]
         await tutor_response("오늘 날씨 어때요?", update, user_profiles[user_id])
 
