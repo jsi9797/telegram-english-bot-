@@ -45,7 +45,7 @@ async def correct_english_and_respond(user_input: str, update: Update):
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await correct_english_and_respond(update.message.text, update)
 
-# 음성 메시지 핸들러
+# 음성 메시지 핸들러 (자연스럽게 수정)
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file = await context.bot.get_file(update.message.voice.file_id)
     ogg_path = "voice.ogg"
@@ -60,7 +60,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     user_text = transcript.text
-    await update.message.reply_text(f"🗣 인식된 문장: {user_text}")
+    # 인식된 문장 출력 제거 → 자연스러운 흐름
     await correct_english_and_respond(user_text, update)
 
 if __name__ == "__main__":
