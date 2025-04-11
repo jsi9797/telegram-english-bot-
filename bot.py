@@ -7,45 +7,27 @@ from pydub import AudioSegment
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
+# ✅ 시스템 프롬프트 (튜터 스타일)
+TUTOR_SYSTEM_PROMPT = """
+You are a friendly and professional English tutor.
+When the student says things like 'Let's start' or 'Teach me',
+you start a mini-lesson with useful daily expressions and short dialogue practice.
+Today's topic is talking about the weather.
+Teach 2-3 useful expressions, give examples, and ask the student to try responding.
+Correct them kindly and provide both encouragement and a voice reply.
+Always keep your tone kind, simple, and supportive.
+"""
+
 # /start 명령
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🎙 음성 또는 텍스트를 입력하면 교정해드릴게요!")
+    await update.message.reply_text("🎙 음성 또는 텍스트를 입력하면 영어 수업을 시작해드릴게요!")
 
 # 텍스트 메시지 처리
-async def correct_english_and_respond(user_input: str, update: Update):
-    prompt = f"Correct this English sentence and explain briefly:\n\n\"{user_input}\""
-    try:
-        # ChatCompletion으로 교정 결과 생성
-        response = openai.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "You are a helpful English teacher."},
-                {"role": "user", "content": prompt}
-            ]
-        )
-        reply = response.choices[0].message.content
-        await update.message.reply_text(reply)
-
-        # 음성 응답 생성
-        speech = openai.audio.speech.create(
-            model="tts-1",
-            voice="nova",
-            input=reply
-        )
-        tts_path = "response.mp3"
-        with open(tts_path, "wb") as f:
-            f.write(speech.content)
-
-        await update.message.reply_voice(voice=open(tts_path, "rb"))
-
-    except Exception as e:
-        await update.message.reply_text(f"❌ 오류 발생: {str(e)}")
-
-# 텍스트 메시지 핸들러
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await correct_english_and_respond(update.message.text, update)
+    user_input = update.message.text
+    await tutor_response(user_input, update)
 
-# 음성 메시지 핸들러 (자연스럽게 수정)
+# 음성 메시지 처리
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file = await context.bot.get_file(update.message.voice.file_id)
     ogg_path = "voice.ogg"
@@ -60,8 +42,35 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     user_text = transcript.text
-    # 인식된 문장 출력 제거 → 자연스러운 흐름
-    await correct_english_and_respond(user_text, update)
+    await tutor_response(user_text, update)
+
+# GPT 튜터 응답 처리
+async def tutor_response(user_input: str, update: Update):
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": TUTOR_SYSTEM_PROMPT},
+                {"role": "user", "content": user_input}
+            ]
+        )
+        reply = response.choices[0].message.content
+        await update.message.reply_text(reply)
+
+        # 음성 생성
+        speech = openai.audio.speech.create(
+            model="tts-1",
+            voice="nova",
+            input=reply
+        )
+        tts_path = "response.mp3"
+        with open(tts_path, "wb") as f:
+            f.write(speech.content)
+
+        await update.message.reply_voice(voice=open(tts_path, "rb"))
+
+    except Exception as e:
+        await update.message.reply_text(f"❌ 오류 발생: {str(e)}")
 
 if __name__ == "__main__":
     app = ApplicationBuilder().token(os.getenv("TELEGRAM_TOKEN")).build()
@@ -69,5 +78,5 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 
-    print("✅ Bot is running with GPT + Voice")
+    print("✅ CC4AI Tutor is running")
     app.run_polling()
