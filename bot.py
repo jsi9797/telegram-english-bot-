@@ -6,15 +6,21 @@ from pydub import AudioSegment
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# /start 명령 처리
+
+# /start 명령어
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("안녕하세요! 🎙 음성 또는 텍스트를 입력하면 교정해드릴게요!")
 
+
 # 텍스트 메시지 처리
-async def correct_english(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_input = update.message.text
+async def correct_english(update: Update, context: ContextTypes.DEFAULT_TYPE, user_input: str = None):
+    if not user_input:
+        user_input = update.message.text
+
     prompt = f"Correct this English sentence and explain briefly:\n\n\"{user_input}\""
+
     try:
+        # GPT 교정
         response = openai.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
@@ -25,43 +31,49 @@ async def correct_english(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply = response.choices[0].message.content
         await update.message.reply_text(reply)
 
-        print("✅ GPT 응답:", reply)  # 로그 확인용
-
-        # 음성 응답 생성
-        print("🔊 TTS 생성 시작")
-        tts_response = openai.audio.speech.create(model="tts-1", voice="nova", input=reply)
-        tts_path = "response.mp3"
-        with open(tts_path, "wb") as f:
-            f.write(tts_response.content)
-
-        await update.message.reply_voice(voice=open(tts_path, "rb"))
+        # TTS 음성 응답 생성
+        speech = openai.audio.speech.create(
+            model="tts-1",
+            voice="nova",
+            input=reply
+        )
+        with open("response.mp3", "wb") as f:
+            f.write(speech.content)
+        await update.message.reply_voice(voice=open("response.mp3", "rb"))
 
     except Exception as e:
-        print("❌ 오류 발생:", e)
         await update.message.reply_text(f"❌ 오류 발생: {str(e)}")
+
 
 # 음성 메시지 처리
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    file = await context.bot.get_file(update.message.voice.file_id)
-    ogg_path = "voice.ogg"
-    mp3_path = "voice.mp3"
-    await file.download_to_drive(ogg_path)
-    AudioSegment.from_ogg(ogg_path).export(mp3_path, format="mp3")
+    try:
+        file = await context.bot.get_file(update.message.voice.file_id)
+        ogg_path = "voice.ogg"
+        mp3_path = "voice.mp3"
 
-    with open(mp3_path, "rb") as f:
-        transcript = openai.audio.transcriptions.create(model="whisper-1", file=f)
+        await file.download_to_drive(ogg_path)
+        AudioSegment.from_ogg(ogg_path).export(mp3_path, format="mp3")
 
-    user_text = transcript.text
-    await update.message.reply_text(f"🗣 인식된 문장: {user_text}")
+        with open(mp3_path, "rb") as f:
+            transcript = openai.audio.transcriptions.create(model="whisper-1", file=f)
 
-    # 교정 로직 재사용
-    update.message.text = user_text
-    await correct_english(update, context)
+        user_text = transcript.text
+        await update.message.reply_text(f"🗣 인식된 문장: {user_text}")
+
+        # 교정 호출 (문장을 전달)
+        await correct_english(update, context, user_input=user_text)
+
+    except Exception as e:
+        await update.message.reply_text(f"❌ 음성 처리 오류: {str(e)}")
+
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(os.getenv("TELEGRAM_TOKEN")).build()
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, correct_english))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
+
     print("🤖 Bot is running with GPT + Voice")
     app.run_polling()
