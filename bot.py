@@ -10,7 +10,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 
 # ✅ Google Sheets 설정
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-CREDENTIALS_PATH = "../credentials.json"  # credentials.json의 상대경로
+CREDENTIALS_PATH = "credentials.json"  # ✅ 상대 경로 수정 완료!
 credentials = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_PATH, scope)
 gc = gspread.authorize(credentials)
 sheet = gc.open_by_url("https://docs.google.com/spreadsheets/d/1z7UMcBJLtDSeTq2-fake-link/edit#gid=0").sheet1  # 🔁 시트 URL 수정 필요
@@ -87,7 +87,6 @@ async def ask_next_question(update, user_id):
             await update.message.reply_text("❌ 등록되지 않은 사용자입니다. 관리자에게 문의해주세요.")
             return
 
-        # ✅ 시트에 저장
         row = [profile.get(k, "") for k, _ in survey_questions]
         sheet.append_row(row)
 
