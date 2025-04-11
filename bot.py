@@ -7,10 +7,33 @@ from pydub import AudioSegment
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# 사용자별 언어 설정 저장용 딕셔너리
+# 사용자별 상태 저장
+user_states = {}
+user_profiles = {}
 user_languages = {}
 
-# 기본 시스템 프롬프트 (튜터 스타일)
+# 언어별 안내 메시지
+survey_questions = [
+    ("company", "✅ 회사명 (Your company name)?"),
+    ("teacher", "✅ 강사 이름 (Your teacher's name)?"),
+    ("native_language", "✅ 모국어가 무엇인가요? (Your native language?)"),
+    ("target_language", "✅ 배우고 싶은 언어는 무엇인가요? (Which language would you like to learn?)"),
+    ("age_group", "✅ 나이대가 어떻게 되나요? (What is your age group?)"),
+    ("level", "✅ 현재 실력은 어느정도인가요? (예: 초급, 중급, 고급 또는 설명으로)\n(What's your level? e.g. beginner, intermediate, advanced or describe it)")
+]
+
+language_prompt = """
+🌍 Please choose your explanation language / 설명을 원하는 언어를 선택해주세요:
+
+🇰🇷 Korean
+🇯🇵 Japanese
+🇨🇳 Chinese
+🇪🇸 Spanish
+🇻🇳 Vietnamese
+🇮🇩 Indonesian
+🇺🇸 English (default)
+"""
+
 def get_system_prompt(language):
     explanation = {
         "Korean": "설명은 한국어로 해주세요.",
@@ -25,71 +48,29 @@ def get_system_prompt(language):
 You are a friendly and professional language tutor.
 When the student says things like 'Let's start' or 'Teach me',
 you start a mini-lesson with useful daily expressions and short dialogue practice.
-Today's topic is talking about the weather.
-Teach 2-3 useful expressions, give examples, and ask the student to try responding.
-Correct them kindly and provide both encouragement and a voice reply.
+Correct their grammar and pronunciation kindly and provide encouragement.
 {explanation}
 Always keep your tone kind, simple, and supportive.
 """
 
-# 언어 선택 프롬프트
-language_prompt = """
-🌍 Before we begin, which language would you like explanations in?
-
-🇰🇷 Korean
-🇯🇵 Japanese
-🇨🇳 Chinese
-🇪🇸 Spanish
-🇻🇳 Vietnamese
-🇮🇩 Indonesian
-🇺🇸 English (default)
-
-Please type one of the above to continue!
-"""
-
-# /start 명령
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id not in user_languages:
-        await update.message.reply_text(language_prompt)
-    else:
-        await update.message.reply_text("🎙 수업을 시작할게요! 텍스트나 음성을 입력해주세요.")
+    user_states[user_id] = {"step": 0, "answers": {}}
+    await update.message.reply_text("👋 설문을 시작합니다!\nLet's start the survey!")
+    await update.message.reply_text(survey_questions[0][1])
 
-# 텍스트 메시지 처리
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    user_input = update.message.text.strip().lower()
+    text = update.message.text.strip()
 
-    # 언어 설정 처리
-    if user_id not in user_languages:
-        if user_input in ["korean", "한국어"]:
-            user_languages[user_id] = "Korean"
-        elif user_input in ["japanese", "日本語"]:
-            user_languages[user_id] = "Japanese"
-        elif user_input in ["spanish", "español"]:
-            user_languages[user_id] = "Spanish"
-        elif user_input in ["vietnamese", "tiếng việt"]:
-            user_languages[user_id] = "Vietnamese"
-        elif user_input in ["chinese", "中文", "mandarin"]:
-            user_languages[user_id] = "Chinese"
-        elif user_input in ["indonesian", "bahasa"]:
-            user_languages[user_id] = "Indonesian"
-        elif user_input in ["english"]:
-            user_languages[user_id] = "English"
-        else:
-            await update.message.reply_text("❗ 언어를 인식하지 못했어요. 다시 입력해주세요. 예: Korean")
-            return
-        await update.message.reply_text("✅ 언어 설정 완료! 이제 수업을 시작합니다.")
+    if user_id not in user_states:
+        await update.message.reply_text("/start 명령어로 설문을 먼저 시작해주세요. Please type /start to begin.")
         return
 
-    await tutor_response(user_input, update, user_languages[user_id])
+    await handle_survey_step(user_id, text, update)
 
-# 음성 메시지 처리
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id not in user_languages:
-        await update.message.reply_text(language_prompt)
-        return
 
     file = await context.bot.get_file(update.message.voice.file_id)
     ogg_path = "voice.ogg"
@@ -102,11 +83,30 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             model="whisper-1",
             file=f
         )
-
     user_text = transcript.text
-    await tutor_response(user_text, update, user_languages[user_id])
 
-# GPT 튜터 응답 처리
+    if user_id in user_states:
+        await handle_survey_step(user_id, user_text, update)
+    elif user_id in user_profiles:
+        await tutor_response(user_text, update, user_languages.get(user_id, "English"))
+    else:
+        await update.message.reply_text("/start로 설문을 먼저 완료해주세요. Please complete the survey with /start first.")
+
+async def handle_survey_step(user_id, text, update):
+    state = user_states[user_id]
+    step = state["step"]
+    state["answers"][survey_questions[step][0]] = text
+    state["step"] += 1
+
+    if state["step"] < len(survey_questions):
+        await update.message.reply_text(survey_questions[state["step"]][1])
+    else:
+        user_profiles[user_id] = state["answers"]
+        user_languages[user_id] = user_profiles[user_id].get("native_language", "English")
+        del user_states[user_id]
+        await update.message.reply_text("✅ 설문 완료! 수업을 시작할게요.\nSurvey complete! Let's begin the lesson.")
+        await tutor_response("수업 시작", update, user_languages[user_id])
+
 async def tutor_response(user_input: str, update: Update, language: str):
     try:
         response = openai.chat.completions.create(
@@ -119,7 +119,6 @@ async def tutor_response(user_input: str, update: Update, language: str):
         reply = response.choices[0].message.content
         await update.message.reply_text(reply)
 
-        # 음성 생성
         speech = openai.audio.speech.create(
             model="tts-1",
             voice="nova",
@@ -140,7 +139,5 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 
-    print("✅ CC4AI Tutor with Full Language Support is running")
-    app.run_polling()
-
+    print("✅ CC4AI Tutor with Survey + Voice Input is running")
     app.run_polling()
