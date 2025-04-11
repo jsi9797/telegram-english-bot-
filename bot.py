@@ -7,13 +7,16 @@ from pydub import AudioSegment
 import json
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+import io  # 🔥 환경변수에서 JSON을 읽을 때 필요
 
-# ✅ Google Sheets 설정
+# ✅ Google Sheets 설정 (환경변수에서 읽기)
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-CREDENTIALS_PATH = "credentials.json"  # ✅ 상대 경로 수정 완료!
-credentials = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_PATH, scope)
+json_key_str = os.getenv("GOOGLE_CREDENTIALS_JSON")  # 환경변수에서 JSON 문자열 읽기
+credentials = ServiceAccountCredentials.from_json_keyfile_name(
+    io.StringIO(json_key_str), scope
+) if json_key_str else None
 gc = gspread.authorize(credentials)
-sheet = gc.open_by_url("https://docs.google.com/spreadsheets/d/1z7UMcBJLtDSeTq2-fake-link/edit#gid=0").sheet1  # 🔁 시트 URL 수정 필요
+sheet = gc.open_by_url("https://docs.google.com/spreadsheets/d/1z7UMcBJLtDSeTq2-fake-link/edit#gid=0").sheet1
 
 # ✅ 허용된 사용자 목록
 google_sheet_whitelist = {
