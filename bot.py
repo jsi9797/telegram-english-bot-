@@ -2,7 +2,6 @@ import os
 import openai
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
-import requests
 from pydub import AudioSegment
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -15,7 +14,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def correct_english(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_input = update.message.text
     prompt = f"Correct this English sentence and explain briefly:\n\n\"{user_input}\""
+
     try:
+        # GPT 응답 받기
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
@@ -26,13 +27,20 @@ async def correct_english(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply = response["choices"][0]["message"]["content"]
         await update.message.reply_text(reply)
 
-        # 음성 응답 생성
-        tts_response = openai.Audio.speech.create(model="tts-1", voice="nova", input=reply)
+        # TTS 응답 생성
+        speech_response = openai.audio.speech.create(
+            model="tts-1",
+            voice="nova",
+            input=reply
+        )
+
         tts_path = "response.mp3"
         with open(tts_path, "wb") as f:
-            f.write(tts_response.content)
+            f.write(speech_response.content)
 
-        await update.message.reply_voice(voice=open(tts_path, "rb"))
+        # 텔레그램에 음성 보내기
+        with open(tts_path, "rb") as voice_file:
+            await update.message.reply_voice(voice=voice_file)
 
     except Exception as e:
         await update.message.reply_text(f"❌ 오류 발생: {str(e)}")
@@ -42,23 +50,30 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file = await context.bot.get_file(update.message.voice.file_id)
     ogg_path = "voice.ogg"
     mp3_path = "voice.mp3"
+
+    # 음성 파일 다운로드 및 변환
     await file.download_to_drive(ogg_path)
     AudioSegment.from_ogg(ogg_path).export(mp3_path, format="mp3")
 
+    # Whisper로 음성 텍스트화
     with open(mp3_path, "rb") as f:
-        transcript = openai.Audio.transcribe(model="whisper-1", file=f)
+        transcript = openai.Audio.transcribe(
+            model="whisper-1",
+            file=f
+        )
 
     user_text = transcript["text"]
     await update.message.reply_text(f"🗣 인식된 문장: {user_text}")
 
-    # 교정 로직 재사용
+    # 교정 로직 호출
     update.message.text = user_text
     await correct_english(update, context)
 
+# 봇 실행
 if __name__ == '__main__':
     app = ApplicationBuilder().token(os.getenv("TELEGRAM_TOKEN")).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, correct_english))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
-    print("🤖 Bot is running with GPT + Voice")
+    print("🤖 Bot is running with GPT + Whisper + TTS")
     app.run_polling()
