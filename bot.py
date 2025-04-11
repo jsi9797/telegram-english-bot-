@@ -4,15 +4,24 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 import requests
 from pydub import AudioSegment
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+import json
+google_sheet_whitelist = {
+    "롯데엠씨씨": ["김선혜", "이수연"],
+    "현대오일뱅크": ["홍길동"],
+}
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
-
-# 사용자별 설정 저장용 딕셔너리
 user_profiles = {}
+user_states = {}
+survey_questions = [
+    ("company", "🏢 회사명 (Your company name)?"),
+    ("teacher", "👩\u200d🏫 강사 이름 (Your teacher's name)?"),
+    ("native", "🗣 모국어가 무엇인가요? (Your native language)?"),
+    ("target", "📘 배우고 싶은 언어는 무엇인가요? (Which language would you like to learn?)"),
+    ("age", "📅 나이대가 어떻게 되나요? (What is your age group?)"),
+    ("gender", "👤 성별이 어떻게 되시나요? (남성/여성)"),
+    ("level", "📊 현재 실력은 어느정도인가요? (예: 초급, 중급, 고급 또는 설명으로) (Your level: beginner/intermediate/advanced?)")
+]
 
-# 언어별 설명 템플릿
 language_explanation = {
     "Korean": "설명은 한국어로 해주세요.",
     "Japanese": "説明は日本語でお願いします。",
@@ -22,7 +31,6 @@ language_explanation = {
     "Indonesian": "Tolong jelaskan dalam Bahasa Indonesia."
 }
 
-# 나이대별 톤 설정 함수
 def get_tone(age, gender):
     if age == "20대":
         return "형" if gender == "남성" else "언니"
@@ -34,59 +42,25 @@ def get_tone(age, gender):
         return "형님" if gender == "남성" else "선생님"
     return "형님"
 
-# 시스템 프롬프트 생성
 def get_system_prompt(profile):
     explanation = language_explanation.get(profile['native'], "Explain in English.")
     tone = get_tone(profile['age'], profile['gender'])
     return f"""
-You are a kind, smart, and responsive GPT tutor.
-Speak like a close and supportive friend using the right tone for a {profile['age']} {profile['gender']} ({tone} 말투).
-The student is learning {profile['target']} and their native language is {profile['native']}.
-Correct them gently. Speak naturally and remember previous mistakes.
-Give grammar and pronunciation tips. Include voice responses.
-Today's topic: weather expressions in {profile['target']}.
-{explanation}
+You are a GPT-based smart language tutor called CC4AI 튜터.
+Speak in a friendly and customized way for a {profile['age']} {profile['gender']} learner. Use terms like 형, 언니, 형님 depending on tone.
+User's native language is {profile['native']} and wants to learn {profile['target']}.
+Explain in their native language: {explanation}
+Correct grammar, pronunciation, and suggest improvements.
+Give examples, praise well, and give a new question/topic daily.
+If the user makes a repeated mistake, kindly point it out and focus more.
+Use text and voice. Make the conversation smooth and natural like ChatGPT.
 """
-
-# 스프레드시트 접근 함수
-def get_sheet():
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
-    client = gspread.authorize(creds)
-    sheet = client.open("CC4AI 튜터 설문지").sheet1
-    return sheet
-
-# 설문 결과 저장 함수
-def save_survey_to_sheet(profile: dict):
-    sheet = get_sheet()
-    sheet.append_row([
-        profile.get("company", ""),
-        profile.get("teacher", ""),
-        profile.get("native", ""),
-        profile.get("target", ""),
-        profile.get("age", ""),
-        profile.get("gender", ""),
-        profile.get("level", "")
-    ])
-
-# 설문지 흐름
-survey_questions = [
-    ("company", "🏢 회사명 (Your company name)?"),
-    ("teacher", "👩‍🏫 강사 이름 (Your teacher's name)?"),
-    ("native", "🗣 모국어가 무엇인가요? (Your native language)?"),
-    ("target", "📘 배우고 싶은 언어는 무엇인가요? (Which language would you like to learn?)"),
-    ("age", "📅 나이대가 어떻게 되나요? (What is your age group?)"),
-    ("gender", "👤 성별이 어떻게 되시나요? (남성/여성)"),
-    ("level", "📊 현재 실력은 어느정도인가요? (예: 초급, 중급, 고급 또는 설명으로) (Your level: beginner/intermediate/advanced?)")
-]
-
-user_states = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_states[user_id] = 0
     user_profiles[user_id] = {}
-    await update.message.reply_text("👋 설문을 시작합니다!\nLet's start the survey!")
+    await update.message.reply_text("👋 설문을 시작합니다! Let's start the survey!")
     await ask_next_question(update, user_id)
 
 async def ask_next_question(update, user_id):
@@ -95,10 +69,15 @@ async def ask_next_question(update, user_id):
         key, question = survey_questions[state]
         await update.message.reply_text(question)
     else:
-        await update.message.reply_text("✅ 설문 완료! 수업을 시작합니다.")
-        save_survey_to_sheet(user_profiles[user_id])
+        profile = user_profiles[user_id]
+        company = profile.get("company")
+        teacher = profile.get("teacher")
+        if company not in google_sheet_whitelist or teacher not in google_sheet_whitelist[company]:
+            await update.message.reply_text("❌ 등록되지 않은 사용자입니다. 관리자에게 문의해주세요.")
+            return
+        await update.message.reply_text("✅ 설문 완료! 이제 수업을 시작할게요 형님.")
         del user_states[user_id]
-        await tutor_response("오늘 날씨 어때요?", update, user_profiles[user_id])
+        await tutor_response("수업을 시작하자", update, profile)
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -115,12 +94,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if profile:
             await tutor_response(text, update, profile)
         else:
-            await update.message.reply_text("/start로 설문을 먼저 시작해주세요!")
+            await update.message.reply_text("처음 오셨군요! 설문부터 진행할게요 형님 📝")
+            user_states[user_id] = 0
+            user_profiles[user_id] = {}
+            await ask_next_question(update, user_id)
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in user_profiles:
-        await update.message.reply_text("먼저 /start로 설문을 시작해주세요.")
+        await update.message.reply_text("처음 오셨군요! 설문부터 진행할게요 형님 📝")
+        user_states[user_id] = 0
+        user_profiles[user_id] = {}
+        await ask_next_question(update, user_id)
         return
 
     file = await context.bot.get_file(update.message.voice.file_id)
@@ -132,8 +117,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with open(mp3_path, "rb") as f:
         transcript = openai.audio.transcriptions.create(model="whisper-1", file=f)
 
-    user_input = transcript.text
-    await tutor_response(user_input, update, user_profiles[user_id])
+    await tutor_response(transcript.text, update, user_profiles[user_id])
 
 async def tutor_response(user_input: str, update: Update, profile: dict):
     try:
@@ -149,7 +133,6 @@ async def tutor_response(user_input: str, update: Update, profile: dict):
         reply = response.choices[0].message.content
         await update.message.reply_text(reply)
 
-        # 음성 생성
         speech = openai.audio.speech.create(
             model="tts-1",
             voice="nova",
@@ -165,6 +148,7 @@ async def tutor_response(user_input: str, update: Update, profile: dict):
         await update.message.reply_text(f"❌ 오류 발생: {str(e)}")
 
 if __name__ == "__main__":
+    openai.api_key = os.getenv("OPENAI_API_KEY")
     app = ApplicationBuilder().token(os.getenv("TELEGRAM_TOKEN")).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
