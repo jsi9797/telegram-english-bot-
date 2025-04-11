@@ -2,6 +2,7 @@ import os
 import openai
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+import requests
 from pydub import AudioSegment
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -26,13 +27,18 @@ async def correct_english(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(reply)
 
         # 음성 응답 생성
-        speech = openai.audio.speech.create(model="tts-1", voice="nova", input=reply)
-        with open("response.mp3", "wb") as f:
-            f.write(speech.content)
-        await update.message.reply_voice(voice=open("response.mp3", "rb"))
+        tts_path = "response.mp3"
+        tts_response = openai.audio.speech.create(
+            model="tts-1",
+            voice="nova",
+            input=reply
+        )
+        tts_response.stream_to_file(tts_path)
+
+        await update.message.reply_voice(voice=open(tts_path, "rb"))
 
     except Exception as e:
-        await update.message.reply_text(f"❌ 오류 발생: {str(e)}")
+        await update.message.reply_text(f"\u274c \uc624\ub958 \ubc1c\uc0dd: {str(e)}")
 
 # 음성 메시지 처리
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -46,7 +52,9 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         transcript = openai.audio.transcriptions.create(model="whisper-1", file=f)
 
     user_text = transcript.text
-    await update.message.reply_text(f"🗣 인식된 문장: {user_text}")
+    await update.message.reply_text(f"\ud83c\udfa3 \uc778\uc2dd\ub41c \ubb38\uc7a5: {user_text}")
+
+    # 교정 로직 재사용
     update.message.text = user_text
     await correct_english(update, context)
 
@@ -55,5 +63,5 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, correct_english))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
-    print("🤖 Bot is running")
+    print("\ud83e\udd16 Bot is running with GPT + Voice")
     app.run_polling()
