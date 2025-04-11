@@ -7,12 +7,11 @@ from pydub import AudioSegment
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# 사용자별 상태 저장
 user_states = {}
 user_profiles = {}
 user_languages = {}
+user_histories = {}  # 사용자별 대화 이력 저장용
 
-# 언어별 안내 메시지
 survey_questions = [
     ("company", "✅ 회사명 (Your company name)?"),
     ("teacher", "✅ 강사 이름 (Your teacher's name)?"),
@@ -21,18 +20,6 @@ survey_questions = [
     ("age_group", "✅ 나이대가 어떻게 되나요? (What is your age group?)"),
     ("level", "✅ 현재 실력은 어느정도인가요? (예: 초급, 중급, 고급 또는 설명으로)\n(What's your level? e.g. beginner, intermediate, advanced or describe it)")
 ]
-
-language_prompt = """
-🌍 Please choose your explanation language / 설명을 원하는 언어를 선택해주세요:
-
-🇰🇷 Korean
-🇯🇵 Japanese
-🇨🇳 Chinese
-🇪🇸 Spanish
-🇻🇳 Vietnamese
-🇮🇩 Indonesian
-🇺🇸 English (default)
-"""
 
 def get_system_prompt(language):
     explanation = {
@@ -45,17 +32,21 @@ def get_system_prompt(language):
     }.get(language, "Explain in English.")
 
     return f"""
-You are a friendly and professional language tutor.
-When the student says things like 'Let's start' or 'Teach me',
-you start a mini-lesson with useful daily expressions and short dialogue practice.
-Correct their grammar and pronunciation kindly and provide encouragement.
+You are a professional but friendly language tutor.
+Hold short daily conversation lessons in the student's target language.
+After each student message:
+- Correct grammar, expressions, and pronunciation if needed
+- Explain errors in simple terms (in their native language)
+- Encourage and expand the conversation naturally
+- Ask a follow-up question based on the topic
 {explanation}
-Always keep your tone kind, simple, and supportive.
+Always stay warm, supportive, and engaging.
 """
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_states[user_id] = {"step": 0, "answers": {}}
+    user_histories[user_id] = []
     await update.message.reply_text("👋 설문을 시작합니다!\nLet's start the survey!")
     await update.message.reply_text(survey_questions[0][1])
 
@@ -63,11 +54,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
 
-    if user_id not in user_states:
+    if user_id not in user_states and user_id not in user_profiles:
         await update.message.reply_text("/start 명령어로 설문을 먼저 시작해주세요. Please type /start to begin.")
         return
 
-    await handle_survey_step(user_id, text, update)
+    if user_id in user_states:
+        await handle_survey_step(user_id, text, update)
+    else:
+        await tutor_response(text, update, user_languages.get(user_id, "English"))
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -103,20 +97,31 @@ async def handle_survey_step(user_id, text, update):
     else:
         user_profiles[user_id] = state["answers"]
         user_languages[user_id] = user_profiles[user_id].get("native_language", "English")
+        user_histories[user_id] = []
         del user_states[user_id]
         await update.message.reply_text("✅ 설문 완료! 수업을 시작할게요.\nSurvey complete! Let's begin the lesson.")
         await tutor_response("수업 시작", update, user_languages[user_id])
 
 async def tutor_response(user_input: str, update: Update, language: str):
+    user_id = update.effective_user.id
+    history = user_histories.get(user_id, [])
+
+    # 대화 이력 최대 5개까지 유지
+    history.append({"role": "user", "content": user_input})
+    if len(history) > 5:
+        history = history[-5:]
+
+    messages = [{"role": "system", "content": get_system_prompt(language)}] + history
+
     try:
         response = openai.chat.completions.create(
             model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": get_system_prompt(language)},
-                {"role": "user", "content": user_input}
-            ]
+            messages=messages
         )
         reply = response.choices[0].message.content
+        history.append({"role": "assistant", "content": reply})
+        user_histories[user_id] = history
+
         await update.message.reply_text(reply)
 
         speech = openai.audio.speech.create(
@@ -139,5 +144,5 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 
-    print("✅ CC4AI Tutor with Survey + Voice Input is running")
+    print("✅ CC4AI Tutor with Contextual Dialogue is running")
     app.run_polling()
