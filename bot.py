@@ -5,6 +5,17 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Con
 import requests
 from pydub import AudioSegment
 import json
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+
+# ✅ Google Sheets 설정
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+CREDENTIALS_PATH = "../credentials.json"  # credentials.json의 상대경로
+credentials = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_PATH, scope)
+gc = gspread.authorize(credentials)
+sheet = gc.open_by_url("https://docs.google.com/spreadsheets/d/1z7UMcBJLtDSeTq2-fake-link/edit#gid=0").sheet1  # 🔁 시트 URL 수정 필요
+
+# ✅ 허용된 사용자 목록
 google_sheet_whitelist = {
     "롯데엠씨씨": ["김선혜", "이수연"],
     "현대오일뱅크": ["홍길동"],
@@ -14,7 +25,7 @@ user_profiles = {}
 user_states = {}
 survey_questions = [
     ("company", "🏢 회사명 (Your company name)?"),
-    ("teacher", "👩\u200d🏫 강사 이름 (Your teacher's name)?"),
+    ("teacher", "👩‍🏫 강사 이름 (Your teacher's name)?"),
     ("native", "🗣 모국어가 무엇인가요? (Your native language)?"),
     ("target", "📘 배우고 싶은 언어는 무엇인가요? (Which language would you like to learn?)"),
     ("age", "📅 나이대가 어떻게 되나요? (What is your age group?)"),
@@ -75,6 +86,11 @@ async def ask_next_question(update, user_id):
         if company not in google_sheet_whitelist or teacher not in google_sheet_whitelist[company]:
             await update.message.reply_text("❌ 등록되지 않은 사용자입니다. 관리자에게 문의해주세요.")
             return
+
+        # ✅ 시트에 저장
+        row = [profile.get(k, "") for k, _ in survey_questions]
+        sheet.append_row(row)
+
         await update.message.reply_text("✅ 설문 완료! 이제 수업을 시작할게요 형님.")
         del user_states[user_id]
         await tutor_response("수업을 시작하자", update, profile)
