@@ -5,27 +5,56 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Con
 import requests
 from pydub import AudioSegment
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-
 user_profiles = {}
 user_states = {}
-user_histories = {}
 
 survey_questions = [
-    ("name", "이름이 무엇인가요? (What is your name?)"),
-    ("native", "모국어가 무엇인가요? (Your native language)?"),
-    ("target", "배우고 싶은 언어는 무엇인가요? (Which language would you like to learn?)"),
-    ("age", "나이대가 어떻게 되시나요? (예: 20대, 30대, 40대 등)?"),
-    ("gender", "성별이 어떻게 되시나요? (남성/여성)?"),
-    ("level", "현재 실력은 어느정도인가요? (예: 초급, 중급, 고급 또는 설명)?")
+    ("native", "🗣 모국어가 무엇인가요? (Your native language)?"),
+    ("target", "📘 배우고 싶은 언어는 무엇인가요? (Which language would you like to learn?)"),
+    ("age", "📅 나이대가 어떻게 되나요? (What is your age group?)"),
+    ("gender", "👤 성별이 어떻게 되시나요? (남성/여성)"),
+    ("level", "📊 현재 실력은 어느정도인가요? (예: 초급, 중급, 고급 또는 설명으로) (Your level: beginner/intermediate/advanced?)")
 ]
+
+language_explanation = {
+    "Korean": "설명은 한국어로 해주세요.",
+    "Japanese": "説明は日本語でお願いします。",
+    "Spanish": "Explica en español, por favor.",
+    "Vietnamese": "Giải thích bằng tiếng Việt giúp tôi.",
+    "Chinese": "请用中文解释。",
+    "Indonesian": "Tolong jelaskan dalam Bahasa Indonesia."
+}
+
+def get_tone(age, gender):
+    if age == "20대":
+        return "형" if gender == "남성" else "언니"
+    elif age == "30대":
+        return "형" if gender == "남성" else "언니"
+    elif age == "40대":
+        return "형님" if gender == "남성" else "언니"
+    elif age == "50대 이상":
+        return "형님" if gender == "남성" else "선생님"
+    return "형님"
+
+def get_system_prompt(profile):
+    explanation = language_explanation.get(profile['native'], "Explain in English.")
+    tone = get_tone(profile['age'], profile['gender'])
+    return f"""
+You are a GPT-based smart language tutor called CC4AI 튜터.
+Speak in a friendly and customized way for a {profile['age']} {profile['gender']} learner. Use terms like 형, 언니, 형님 depending on tone.
+User's native language is {profile['native']} and wants to learn {profile['target']}.
+Explain in their native language: {explanation}
+Correct grammar, pronunciation, and suggest improvements.
+Give examples, praise well, and give a new question/topic daily.
+If the user makes a repeated mistake, kindly point it out and focus more.
+Use text and voice. Make the conversation smooth and natural like ChatGPT.
+"""
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    user_profiles[user_id] = {}
     user_states[user_id] = 0
-    await update.message.reply_text("📝 설문조사를 시작합니다! 텍스트로 입력해주세요.")
+    user_profiles[user_id] = {}
+    await update.message.reply_text("👋 설문을 시작합니다! Let's start the survey!")
     await ask_next_question(update, user_id)
 
 async def ask_next_question(update, user_id):
@@ -34,23 +63,13 @@ async def ask_next_question(update, user_id):
         key, question = survey_questions[state]
         await update.message.reply_text(question)
     else:
-        profile = user_profiles[user_id]
-        name = profile.get("name", "학습자")
-        user_histories[user_id] = []
-        await update.message.reply_text(f"✅ 설문이 완료되었습니다. 이제 수업을 시작할게요 {name}님!")
+        await update.message.reply_text("✅ 설문 완료! 이제 수업을 시작할게요 형님.")
         del user_states[user_id]
-        await tutor_response("오늘 수업을 시작하겠습니다!", update, profile)
+        await tutor_response("수업을 시작하자", update, user_profiles[user_id])
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
-
-    if "설문조사" in text:
-        user_profiles[user_id] = {}
-        user_states[user_id] = 0
-        await update.message.reply_text("📝 설문조사를 다시 시작합니다.")
-        await ask_next_question(update, user_id)
-        return
 
     if user_id in user_states:
         state = user_states[user_id]
@@ -63,12 +82,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if profile:
             await tutor_response(text, update, profile)
         else:
-            await start(update, context)
+            await update.message.reply_text("처음 오셨군요! 설문부터 진행할게요 형님 📝")
+            user_states[user_id] = 0
+            user_profiles[user_id] = {}
+            await ask_next_question(update, user_id)
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id not in user_profiles or user_id in user_states:
-        await update.message.reply_text("음성은 설문 완료 후 사용하실 수 있어요. 먼저 설문을 완료해주세요.")
+    if user_id not in user_profiles:
+        await update.message.reply_text("처음 오셨군요! 설문부터 진행할게요 형님 📝")
+        user_states[user_id] = 0
+        user_profiles[user_id] = {}
+        await ask_next_question(update, user_id)
         return
 
     file = await context.bot.get_file(update.message.voice.file_id)
@@ -82,52 +107,18 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await tutor_response(transcript.text, update, user_profiles[user_id])
 
-def get_system_prompt(profile):
-    level = profile.get("level", "").lower()
-    native = profile.get("native", "Korean")
-    target = profile.get("target", "English")
-    name = profile.get("name", "학습자")
-
-    if "초급" in level:
-        native_ratio = 0.9
-    elif "중급" in level:
-        native_ratio = 0.5
-    else:
-        native_ratio = 0.2
-
-    return f"""
-You are a smart GPT tutor for language learners.
-
-The learner's name is {name}, native language is {native}, and target language is {target}.
-Please explain using {int(native_ratio*100)}% native language and {int((1-native_ratio)*100)}% target language.
-
-Teach through dialogue, but let the learner speak first.
-Correct grammar, pronunciation (focus on R/L/TH/V etc.), and guide pronunciation.
-
-If the learner says something related to a topic (e.g. 'computer'), continue the topic and teach grammar, vocab, and pronunciation based on that.
-
-Remember previous utterances and avoid repeating yourself or changing topics unnaturally.
-Always speak politely using {name}님, and avoid slang or childish tones.
-"""
-
 async def tutor_response(user_input: str, update: Update, profile: dict):
-    user_id = update.effective_user.id
-    system_prompt = get_system_prompt(profile)
-    history = user_histories.get(user_id, [])
-
-    messages = [{"role": "system", "content": system_prompt}]
-    messages.extend(history[-5:])  # 최근 대화 5개 기억
-    messages.append({"role": "user", "content": user_input})
-
     try:
+        system_prompt = get_system_prompt(profile)
+
         response = openai.chat.completions.create(
             model="gpt-3.5-turbo",
-            messages=messages
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_input}
+            ]
         )
         reply = response.choices[0].message.content
-        user_histories.setdefault(user_id, []).append({"role": "user", "content": user_input})
-        user_histories[user_id].append({"role": "assistant", "content": reply})
-
         await update.message.reply_text(reply)
 
         speech = openai.audio.speech.create(
@@ -135,15 +126,18 @@ async def tutor_response(user_input: str, update: Update, profile: dict):
             voice="nova",
             input=reply
         )
-        with open("response.mp3", "wb") as f:
+        tts_path = "response.mp3"
+        with open(tts_path, "wb") as f:
             f.write(speech.content)
-        await update.message.reply_voice(voice=open("response.mp3", "rb"))
+
+        await update.message.reply_voice(voice=open(tts_path, "rb"))
 
     except Exception as e:
         await update.message.reply_text(f"❌ 오류 발생: {str(e)}")
 
 if __name__ == "__main__":
-    app = ApplicationBuilder().token(TOKEN).build()
+    openai.api_key = os.getenv("OPENAI_API_KEY")
+    app = ApplicationBuilder().token(os.getenv("TELEGRAM_TOKEN")).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
