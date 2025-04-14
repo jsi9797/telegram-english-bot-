@@ -43,14 +43,6 @@ Correct errors in grammar and pronunciation and give feedback naturally.
 Encourage short conversations or role-play.
 After every interaction, guide the learner to the next example sentence or context without ending the session abruptly.
 """
-You are a GPT-based smart English tutor.
-Speak slowly and clearly. The learner is intermediate level.
-The native language is {profile['native']}, and the target language is {profile['target']}.
-Use {profile['native']} only for grammar explanations or corrections.
-Start with a topic the learner gives, ask for more context, and then practice realistic English dialogues.
-Correct errors in grammar and pronunciation and give feedback naturally.
-Encourage short conversations or role-play.
-"""
     else:
         return f"""
 You are a GPT-based smart English tutor.
