@@ -34,15 +34,14 @@ def get_system_prompt(profile):
     name = profile.get("name", "학습자")
     level = profile.get("level", "").lower()
     lang = profile.get("target", "the target language")
-    
-    # 레벨에 따른 설명 방식
+
     if "초급" in level:
         explain_detail = f"{explanation} 영어 표현을 알려주되 예시와 함께 천천히 설명해주세요."
     elif "중급" in level:
         explain_detail = f"{explanation} 영어로 대화하되 필요한 경우만 간단히 모국어로 설명해주세요."
     else:
         explain_detail = f"주로 영어로 설명하고, 복잡한 개념은 {explanation} 간단히 보충해주세요."
-    
+
     return f"""
 You are a smart GPT-based language tutor named CC4AI 튜터.
 The user's name is {name}, native language is {profile['native']}, and wants to learn {lang}.
@@ -72,7 +71,6 @@ async def ask_next_question(update, user_id):
     else:
         profile = user_profiles[user_id]
         await update.message.reply_text(f"✅ 설문 완료! 이제 수업을 시작할게요 {profile['name']}님.")
-        # ✅ 설문 완료 시 상태 제거
         if user_id in user_states:
             del user_states[user_id]
         await tutor_response("수업을 시작하자", update, profile)
@@ -81,30 +79,30 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
 
+    # 설문 진행 중
     if user_id in user_states:
         state = user_states[user_id]
         key, _ = survey_questions[state]
         user_profiles[user_id][key] = text
         user_states[user_id] += 1
         await ask_next_question(update, user_id)
+        return  # 설문 중이면 GPT 응답 금지
+
+    # 설문 완료 후 GPT 응답
+    profile = user_profiles.get(user_id)
+    if profile:
+        await tutor_response(text, update, profile)
     else:
-        profile = user_profiles.get(user_id)
-        if profile:
-            if user_id in user_states:  # 혹시 남아 있으면 제거
-                del user_states[user_id]
-            await tutor_response(text, update, profile)
-        else:
-            await update.message.reply_text("처음 오셨군요! 설문부터 시작할게요 📝")
-            user_states[user_id] = 0
-            user_profiles[user_id] = {}
-            await ask_next_question(update, user_id)
+        user_states[user_id] = 0
+        user_profiles[user_id] = {}
+        await ask_next_question(update, user_id)
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
     if user_id not in user_profiles or user_id in user_states:
         await update.message.reply_text("설문을 먼저 완료해주세요 📝")
-        return
+        return  # 설문 도중 음성 입력 차단
 
     file = await context.bot.get_file(update.message.voice.file_id)
     ogg_path = "voice.ogg"
@@ -143,7 +141,6 @@ async def tutor_response(user_input: str, update: Update, profile: dict):
 
         await update.message.reply_voice(voice=open(tts_path, "rb"))
 
-        # 히스토리 저장
         user_id = update.effective_user.id
         if user_id in user_histories:
             user_histories[user_id].append({"input": user_input, "reply": reply})
