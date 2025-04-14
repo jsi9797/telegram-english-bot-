@@ -7,7 +7,7 @@ from pydub import AudioSegment
 
 user_profiles = {}
 user_states = {}
-user_histories = {}  # 💡 수업 주제 흐름 기억용 히스토리 추가
+user_histories = {}  # 히스토리 저장용
 
 survey_questions = [
     ("native", "🗣 모국어가 무엇인가요? (Your native language)?"),
@@ -66,7 +66,7 @@ async def ask_next_question(update, user_id):
     else:
         await update.message.reply_text("✅ 설문 완료! 이제 수업을 시작할게요 형님.")
         del user_states[user_id]
-        await tutor_response("수업을 시작하자", update, user_profiles[user_id])
+        await update.message.reply_text("무슨 주제로 수업을 시작해볼까요?")  # 🔁 GPT가 먼저 주제를 제안하지 않음
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -116,10 +116,11 @@ async def tutor_response(user_input: str, update: Update, profile: dict):
         if user_id not in user_histories:
             user_histories[user_id] = []
 
-        # 이전 히스토리 저장
-        user_histories[user_id].append({"role": "user", "content": user_input})
-        history = user_histories[user_id][-10:]
+        # GPT가 이해 못하는 "수업을 시작하자" 같은 문장은 저장 안함
+        if user_input.lower() != "수업을 시작하자":
+            user_histories[user_id].append({"role": "user", "content": user_input})
 
+        history = user_histories[user_id][-10:]
         messages = [{"role": "system", "content": system_prompt}] + history
 
         response = openai.chat.completions.create(
