@@ -7,6 +7,7 @@ from pydub import AudioSegment
 
 user_profiles = {}
 user_states = {}
+user_histories = {}  # 💡 수업 주제 흐름 기억용 히스토리 추가
 
 survey_questions = [
     ("native", "🗣 모국어가 무엇인가요? (Your native language)?"),
@@ -109,16 +110,26 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def tutor_response(user_input: str, update: Update, profile: dict):
     try:
+        user_id = update.effective_user.id
         system_prompt = get_system_prompt(profile)
+
+        if user_id not in user_histories:
+            user_histories[user_id] = []
+
+        # 이전 히스토리 저장
+        user_histories[user_id].append({"role": "user", "content": user_input})
+        history = user_histories[user_id][-10:]
+
+        messages = [{"role": "system", "content": system_prompt}] + history
 
         response = openai.chat.completions.create(
             model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_input}
-            ]
+            messages=messages
         )
+
         reply = response.choices[0].message.content
+        user_histories[user_id].append({"role": "assistant", "content": reply})
+
         await update.message.reply_text(reply)
 
         speech = openai.audio.speech.create(
