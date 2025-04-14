@@ -47,7 +47,6 @@ For each example sentence:
 After the learner finishes 3-4 sentences, ask them a question that allows them to use the learned expressions in a short, creative response. Guide the learner to practice and build confidence.
 Make it interactive and guide them step-by-step.
 """
-"""
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -157,3 +156,4 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     print("✅ CC4AI 튜터 작동 중")
     app.run_polling()
+
