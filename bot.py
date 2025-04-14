@@ -13,11 +13,11 @@ user_histories = {}
 
 survey_questions = [
     ("name", "👋 이름을 알려주세요! (What’s your name?)"),
-    ("native", "🗣 모국어가 무엇인가요? (Your native language)?"),
-    ("target", "📘 배우고 싶은 언어는 무엇인가요? (Which language would you like to learn?)"),
-    ("age", "📅 나이대가 어떻게 되나요? (예: 20대, 30대, 40대, 50대 이상)"),
+    ("native", "🗣 모국어가 무엇인가요? (예: 한국어, 일본어)"),
+    ("target", "📘 배우고 싶은 언어는 무엇인가요? (예: 영어, 일본어)"),
+    ("age", "📅 나이대가 어떻게 되시나요? (예: 20대, 30대, 40대, 50대 이상)"),
     ("gender", "👤 성별이 어떻게 되시나요? (남성/여성)"),
-    ("level", "📊 현재 실력은 어느정도인가요? (예: 초급, 중급, 고급 또는 설명으로)")
+    ("level", "📊 현재 실력은 어느정도인가요? (예: 초급, 중급, 고급 또는 설명)")
 ]
 
 language_explanation = {
@@ -35,7 +35,7 @@ def get_system_prompt(profile):
     level = profile.get("level", "").lower()
     lang = profile.get("target", "the target language")
     
-    # 모국어 설명 비율
+    # 레벨에 따른 설명 방식
     if "초급" in level:
         explain_detail = f"{explanation} 영어 표현을 알려주되 예시와 함께 천천히 설명해주세요."
     elif "중급" in level:
@@ -70,9 +70,12 @@ async def ask_next_question(update, user_id):
         key, question = survey_questions[state]
         await update.message.reply_text(question)
     else:
-        await update.message.reply_text(f"✅ 설문 완료! 이제 수업을 시작할게요 {user_profiles[user_id]['name']}님.")
-        del user_states[user_id]
-        await tutor_response("수업을 시작하자", update, user_profiles[user_id])
+        profile = user_profiles[user_id]
+        await update.message.reply_text(f"✅ 설문 완료! 이제 수업을 시작할게요 {profile['name']}님.")
+        # ✅ 설문 완료 시 상태 제거
+        if user_id in user_states:
+            del user_states[user_id]
+        await tutor_response("수업을 시작하자", update, profile)
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -87,6 +90,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         profile = user_profiles.get(user_id)
         if profile:
+            if user_id in user_states:  # 혹시 남아 있으면 제거
+                del user_states[user_id]
             await tutor_response(text, update, profile)
         else:
             await update.message.reply_text("처음 오셨군요! 설문부터 시작할게요 📝")
