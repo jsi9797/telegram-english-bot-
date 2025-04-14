@@ -2,19 +2,29 @@ import os
 import openai
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
-import requests
 from pydub import AudioSegment
+import json
+from datetime import datetime
 
-user_profiles = {}
-user_states = {}
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-survey_questions = [
-    ("native", "🗣 모국어가 무엇인가요? (Your native language)?"),
-    ("target", "📘 배우고 싶은 언어는 무엇인가요? (Which language would you like to learn?)"),
-    ("age", "📅 나이대가 어떻게 되나요? (What is your age group?)"),
-    ("gender", "👤 성별이 어떻게 되시나요? (남성/여성)"),
-    ("level", "📊 현재 실력은 어느정도인가요? (예: 초급, 중급, 고급 또는 설명으로) (Your level: beginner/intermediate/advanced?)")
-]
+HISTORY_FOLDER = "history"
+os.makedirs(HISTORY_FOLDER, exist_ok=True)
+
+def get_history_path(user_id):
+    return os.path.join(HISTORY_FOLDER, f"{user_id}.json")
+
+def load_history(user_id):
+    path = get_history_path(user_id)
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {"profile": {}, "history": []}
+
+def save_history(user_id, profile, history):
+    path = get_history_path(user_id)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"profile": profile, "history": history}, f, ensure_ascii=False, indent=2)
 
 language_explanation = {
     "Korean": "설명은 한국어로 해주세요.",
@@ -22,80 +32,77 @@ language_explanation = {
     "Spanish": "Explica en español, por favor.",
     "Vietnamese": "Giải thích bằng tiếng Việt giúp tôi.",
     "Chinese": "请用中文解释。",
-    "Indonesian": "Tolong jelaskan dalam Bahasa Indonesia."
+    "Indonesian": "Tolong jelaskan dalam Bahasa Indonesia.",
 }
 
-def get_tone(age, gender):
-    if age == "20대":
-        return "형" if gender == "남성" else "언니"
-    elif age == "30대":
-        return "형" if gender == "남성" else "언니"
-    elif age == "40대":
-        return "형님" if gender == "남성" else "언니"
-    elif age == "50대 이상":
-        return "형님" if gender == "남성" else "선생님"
-    return "형님"
-
 def get_system_prompt(profile):
-    explanation = language_explanation.get(profile['native'], "Explain in English.")
-    tone = get_tone(profile['age'], profile['gender'])
+    native = profile.get("native", "Korean")
+    target = profile.get("target", "English")
+    level = profile.get("level", "초급")
+    explanation = language_explanation.get(native, "Explain in English.")
+    name = profile.get("name", "형님")
+
+    if level == "초급":
+        lang_ratio = "80% 모국어 설명, 20% 학습 언어"
+    elif level == "중급":
+        lang_ratio = "50% 모국어 설명, 50% 학습 언어"
+    else:
+        lang_ratio = "거의 학습 언어로만 설명"
+
     return f"""
-You are a GPT-based smart language tutor called CC4AI 튜터.
-Speak in a friendly and customized way for a {profile['age']} {profile['gender']} learner. Use terms like 형, 언니, 형님 depending on tone.
-User's native language is {profile['native']} and wants to learn {profile['target']}.
-Explain in their native language: {explanation}
-Correct grammar, pronunciation, and suggest improvements.
-Give examples, praise well, and give a new question/topic daily.
-If the user makes a repeated mistake, kindly point it out and focus more.
-Use text and voice. Make the conversation smooth and natural like ChatGPT.
+너는 CC4AI 튜터야. 학습자 이름은 {name}이고, 모국어는 {native}, 배우고 싶은 언어는 {target}, 현재 레벨은 {level}이야.
+설명은 {explanation}로 해줘. 설명 비율은 {lang_ratio}야.
+학습자가 먼저 말하면, 그 내용에 대해 문법, 발음, 단어 등 학습 포인트를 자연스럽게 뽑아줘.
+가능하면 예시 문장도 주고, 따라 말하게 하고, 음성으로도 전달해.
+이전에 학습자가 한 말과 실수를 기억하고 연결해서 알려줘.
+절대로 혼자서 수업 끝내지 말고, 학습자가 끝낼 때까지 흐름을 이어가.
 """
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    user_states[user_id] = 0
-    user_profiles[user_id] = {}
-    await update.message.reply_text("👋 설문을 시작합니다! Let's start the survey!")
-    await ask_next_question(update, user_id)
-
-async def ask_next_question(update, user_id):
-    state = user_states[user_id]
-    if state < len(survey_questions):
-        key, question = survey_questions[state]
-        await update.message.reply_text(question)
-    else:
-        await update.message.reply_text("✅ 설문 완료! 이제 수업을 시작할게요 형님.")
-        del user_states[user_id]
-        await tutor_response("수업을 시작하자", update, user_profiles[user_id])
+    first_name = update.effective_user.first_name
+    history_data = load_history(user_id)
+    history_data["profile"]["name"] = first_name + "님"
+    save_history(user_id, history_data["profile"], history_data["history"])
+    await update.message.reply_text(f"{first_name}님, 안녕하세요! 수업을 시작할게요. 오늘은 취미에 대해 이야기해볼까요? 어떤 취미를 가지고 계신가요?")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    text = update.message.text.strip()
+    user_input = update.message.text.strip()
+    history_data = load_history(user_id)
+    profile = history_data.get("profile", {})
+    history = history_data.get("history", [])
 
-    if user_id in user_states:
-        state = user_states[user_id]
-        key, _ = survey_questions[state]
-        user_profiles[user_id][key] = text
-        user_states[user_id] += 1
-        await ask_next_question(update, user_id)
-    else:
-        profile = user_profiles.get(user_id)
-        if profile:
-            await tutor_response(text, update, profile)
-        else:
-            await update.message.reply_text("처음 오셨군요! 설문부터 진행할게요 형님 📝")
-            user_states[user_id] = 0
-            user_profiles[user_id] = {}
-            await ask_next_question(update, user_id)
+    history.append({"user": user_input, "time": str(datetime.now())})
+    save_history(user_id, profile, history)
+
+    system_prompt = get_system_prompt(profile)
+
+    response = openai.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            *[
+                {"role": "user", "content": item["user"]}
+                for item in history[-5:]
+            ],
+        ]
+    )
+    reply = response.choices[0].message.content
+    await update.message.reply_text(reply)
+
+    speech = openai.audio.speech.create(
+        model="tts-1",
+        voice="nova",
+        input=reply
+    )
+    tts_path = "response.mp3"
+    with open(tts_path, "wb") as f:
+        f.write(speech.content)
+    await update.message.reply_voice(voice=open(tts_path, "rb"))
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id not in user_profiles:
-        await update.message.reply_text("처음 오셨군요! 설문부터 진행할게요 형님 📝")
-        user_states[user_id] = 0
-        user_profiles[user_id] = {}
-        await ask_next_question(update, user_id)
-        return
-
     file = await context.bot.get_file(update.message.voice.file_id)
     ogg_path = "voice.ogg"
     mp3_path = "voice.mp3"
@@ -105,38 +112,10 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with open(mp3_path, "rb") as f:
         transcript = openai.audio.transcriptions.create(model="whisper-1", file=f)
 
-    await tutor_response(transcript.text, update, user_profiles[user_id])
-
-async def tutor_response(user_input: str, update: Update, profile: dict):
-    try:
-        system_prompt = get_system_prompt(profile)
-
-        response = openai.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_input}
-            ]
-        )
-        reply = response.choices[0].message.content
-        await update.message.reply_text(reply)
-
-        speech = openai.audio.speech.create(
-            model="tts-1",
-            voice="nova",
-            input=reply
-        )
-        tts_path = "response.mp3"
-        with open(tts_path, "wb") as f:
-            f.write(speech.content)
-
-        await update.message.reply_voice(voice=open(tts_path, "rb"))
-
-    except Exception as e:
-        await update.message.reply_text(f"❌ 오류 발생: {str(e)}")
+    update.message.text = transcript.text
+    await handle_text(update, context)
 
 if __name__ == "__main__":
-    openai.api_key = os.getenv("OPENAI_API_KEY")
     app = ApplicationBuilder().token(os.getenv("TELEGRAM_TOKEN")).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
