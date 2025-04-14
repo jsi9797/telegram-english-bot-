@@ -7,7 +7,8 @@ from pydub import AudioSegment
 
 user_profiles = {}
 user_states = {}
-user_histories = {}  # 히스토리 저장용
+user_histories = {}
+user_topics = {}  # ✅ 현재 학습 중인 주제 저장용
 
 survey_questions = [
     ("native", "🗣 모국어가 무엇인가요? (Your native language)?"),
@@ -41,14 +42,15 @@ def get_system_prompt(profile):
     explanation = language_explanation.get(profile['native'], "Explain in English.")
     tone = get_tone(profile['age'], profile['gender'])
     return f"""
-You are a GPT-based smart language tutor called CC4AI 튜터.
-Speak in a friendly and customized way for a {profile['age']} {profile['gender']} learner. Use terms like 형, 언니, 형님 depending on tone.
-User's native language is {profile['native']} and wants to learn {profile['target']}.
-Explain in their native language: {explanation}
-Correct grammar, pronunciation, and suggest improvements.
-Give examples, praise well, and give a new question/topic daily.
-If the user makes a repeated mistake, kindly point it out and focus more.
-Use text and voice. Make the conversation smooth and natural like ChatGPT.
+You are a smart language tutor called CC4AI 튜터.
+The user is a {profile['age']} {profile['gender']}, native language: {profile['native']}, learning: {profile['target']}.
+Explain grammar, expressions and pronunciation in a friendly way using {profile['native']}.
+When the user gives a topic (e.g., computer, travel, food), ask a follow-up question to go deeper (e.g., 'coding', 'hardware').
+Then, based on the subtopic, teach useful English expressions, vocabulary, and pronunciation.
+Give example sentences and encourage the user to repeat them.
+Then, wait for the user’s voice or message.
+Do not only explain the topic, always teach English based on it.
+Keep the conversation flowing naturally.
 """
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -66,7 +68,7 @@ async def ask_next_question(update, user_id):
     else:
         await update.message.reply_text("✅ 설문 완료! 이제 수업을 시작할게요 형님.")
         del user_states[user_id]
-        await update.message.reply_text("무슨 주제로 수업을 시작해볼까요?")  # 🔁 GPT가 먼저 주제를 제안하지 않음
+        await update.message.reply_text("무슨 주제로 수업을 시작해볼까요?")  # 학습자 중심 시작
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -116,10 +118,16 @@ async def tutor_response(user_input: str, update: Update, profile: dict):
         if user_id not in user_histories:
             user_histories[user_id] = []
 
-        # GPT가 이해 못하는 "수업을 시작하자" 같은 문장은 저장 안함
-        if user_input.lower() != "수업을 시작하자":
-            user_histories[user_id].append({"role": "user", "content": user_input})
+        # ✅ 주제를 기억 (처음 입력 시)
+        if user_id not in user_topics:
+            user_topics[user_id] = None
 
+        # 주제를 정하지 않았다면, 지금 주제를 저장
+        if user_topics[user_id] is None and len(user_input) < 20:
+            user_topics[user_id] = user_input
+
+        # GPT 대화 히스토리 구성
+        user_histories[user_id].append({"role": "user", "content": user_input})
         history = user_histories[user_id][-10:]
         messages = [{"role": "system", "content": system_prompt}] + history
 
