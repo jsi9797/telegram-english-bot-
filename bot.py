@@ -27,12 +27,22 @@ language_explanation = {
     "Indonesian": "Tolong jelaskan dalam Bahasa Indonesia."
 }
 
-def get_system_prompt(profile):
+def get_system_prompt(profile):  # 💡 Modified to reflect level-based instruction language handling
     explanation = language_explanation.get(profile['native'], "Explain in English.")
     level = profile.get("level", "beginner").lower()
 
     if "중급" in level or "intermediate" in level:
         return f"""
+You are a GPT-based smart English tutor.
+Speak slowly and clearly. The learner is intermediate level.
+The native language is {profile['native']}, and the target language is {profile['target']}.
+Use {profile['native']} only for grammar explanations or corrections.
+Conduct the class strictly in {profile['target']}, unless explanation is needed.
+Start with a topic the learner gives, ask for more context, and then practice realistic English dialogues.
+Correct errors in grammar and pronunciation and give feedback naturally.
+Encourage short conversations or role-play.
+After every interaction, guide the learner to the next example sentence or context without ending the session abruptly.
+"""
 You are a GPT-based smart English tutor.
 Speak slowly and clearly. The learner is intermediate level.
 The native language is {profile['native']}, and the target language is {profile['target']}.
@@ -46,9 +56,12 @@ Encourage short conversations or role-play.
 You are a GPT-based smart English tutor.
 Speak very slowly and clearly. The learner is beginner level.
 Use {profile['native']} for 80% of the explanation, and use {profile['target']} only in short, easy sentences.
+Conduct the class in {profile['target']} with support in {profile['native']}.
 When a topic is given (e.g., travel, computer), break it into subtopics.
 Give 2-3 short example sentences and basic vocabulary with explanation.
 Ask the learner to repeat and give pronunciation feedback.
+Then immediately guide them to the next phrase or practice sentence.
+Never stop with "you did great" only — always follow up with next content.
 Make it interactive and guide them step-by-step.
 """
 
@@ -121,7 +134,7 @@ async def tutor_response(user_input: str, update: Update, profile: dict):
             user_topics[user_id] = None
 
         # 주제를 처음 정했을 경우 저장
-        if user_topics[user_id] is None and len(user_input) < 30:
+        if user_topics[user_id] is None and any(keyword in user_input.lower() for keyword in ['여행', '컴퓨터', '비즈니스', '코딩', '영어 수업', 'travel', 'computer', 'business', 'coding', 'english lesson']):
             user_topics[user_id] = user_input
 
         user_histories[user_id].append({"role": "user", "content": user_input})
