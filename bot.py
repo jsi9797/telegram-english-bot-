@@ -2,22 +2,22 @@ import os
 import openai
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
-import requests
 from pydub import AudioSegment
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
 user_profiles = {}
 user_states = {}
 user_histories = {}
 
 survey_questions = [
-    ("name", "👋 이름을 알려주세요! (What’s your name?)"),
-    ("native", "🗣 모국어가 무엇인가요? (예: 한국어, 일본어)"),
-    ("target", "📘 배우고 싶은 언어는 무엇인가요? (예: 영어, 일본어)"),
-    ("age", "📅 나이대가 어떻게 되시나요? (예: 20대, 30대, 40대, 50대 이상)"),
+    ("name", "📝 이름이 무엇인가요? (What is your name?)"),
+    ("native", "🗣 모국어가 무엇인가요? (Your native language)?"),
+    ("target", "📘 배우고 싶은 언어는 무엇인가요? (Which language would you like to learn?)"),
+    ("age", "📅 나이대가 어떻게 되나요? (What is your age group?)"),
     ("gender", "👤 성별이 어떻게 되시나요? (남성/여성)"),
-    ("level", "📊 현재 실력은 어느정도인가요? (예: 초급, 중급, 고급 또는 설명)")
+    ("level", "📊 현재 실력은 어느정도인가요? (예: 초급, 중급, 고급 또는 설명으로) (Your level: beginner/intermediate/advanced?)")
 ]
 
 language_explanation = {
@@ -29,30 +29,30 @@ language_explanation = {
     "Indonesian": "Tolong jelaskan dalam Bahasa Indonesia."
 }
 
-def get_system_prompt(profile):
-    explanation = language_explanation.get(profile['native'], "Explain in English.")
-    name = profile.get("name", "학습자")
+def get_system_prompt(profile, history):
+    explanation = language_explanation.get(profile.get("native", ""), "Explain in English.")
+    name = profile.get("name", "학습자") + "님"
+    history_summary = "\n".join(history[-3:])
+
     level = profile.get("level", "").lower()
-    lang = profile.get("target", "the target language")
-
-    if "초급" in level:
-        explain_detail = f"{explanation} 영어 표현을 알려주되 예시와 함께 천천히 설명해주세요."
-    elif "중급" in level:
-        explain_detail = f"{explanation} 영어로 대화하되 필요한 경우만 간단히 모국어로 설명해주세요."
+    if "초" in level or "beginner" in level:
+        native_ratio = 0.9
+    elif "중" in level or "intermediate" in level:
+        native_ratio = 0.5
     else:
-        explain_detail = f"주로 영어로 설명하고, 복잡한 개념은 {explanation} 간단히 보충해주세요."
+        native_ratio = 0.2
 
-    return f"""
-You are a smart GPT-based language tutor named CC4AI 튜터.
-The user's name is {name}, native language is {profile['native']}, and wants to learn {lang}.
-Age group: {profile['age']}, Gender: {profile['gender']}, Level: {profile['level']}.
-Use {name}님 as the learner's title in every reply.
-Your job is to correct grammar and pronunciation based on learner input.
-Provide short examples, praise often, and ask natural follow-up questions.
-Guide the learner to repeat corrected sentences aloud.
-If the learner struggles with pronunciation (like R/L or TH sounds), give friendly correction.
-Avoid ending the class prematurely. Keep going unless 20 minutes passed.
-{explain_detail}
+    return f"""You are a GPT-based smart language tutor named CC4AI 튜터.
+Your student's name is {name}.
+They want to learn {profile.get("target", "English")} and their native language is {profile.get("native", "Korean")}.
+Speak clearly, explain using their native language ({explanation}) at a {int(native_ratio*100)}% ratio.
+Always begin by reacting to what they said. Then correct grammar and pronunciation if needed.
+Give example sentences and encourage them to repeat aloud.
+Then ask a related follow-up question or suggest a related expression.
+Avoid repeating 'Do you want to learn more expressions?' often.
+Keep track of conversation history and link lessons accordingly.
+Recent conversation:
+{history_summary}
 """
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -60,7 +60,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_states[user_id] = 0
     user_profiles[user_id] = {}
     user_histories[user_id] = []
-    await update.message.reply_text("👋 설문을 시작합니다! Let's start the survey!")
+    await update.message.reply_text("👋 설문을 시작할게요! Please answer the following questions:")
     await ask_next_question(update, user_id)
 
 async def ask_next_question(update, user_id):
@@ -69,40 +69,44 @@ async def ask_next_question(update, user_id):
         key, question = survey_questions[state]
         await update.message.reply_text(question)
     else:
-        profile = user_profiles[user_id]
-        await update.message.reply_text(f"✅ 설문 완료! 이제 수업을 시작할게요 {profile['name']}님.")
-        if user_id in user_states:
-            del user_states[user_id]
-        await tutor_response("수업을 시작하자", update, profile)
+        await update.message.reply_text(f"✅ 설문이 완료되었습니다. 이제 수업을 시작할게요 {user_profiles[user_id]['name']}님!")
+        del user_states[user_id]
+        await tutor_response("수업을 시작하자", update, user_profiles[user_id])
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
 
-    # 설문 진행 중
+    if "설문조사" in text and "다시" in text:
+        user_states[user_id] = 0
+        user_profiles[user_id] = {}
+        await update.message.reply_text("🔄 설문을 다시 시작할게요.")
+        await ask_next_question(update, user_id)
+        return
+
     if user_id in user_states:
         state = user_states[user_id]
         key, _ = survey_questions[state]
         user_profiles[user_id][key] = text
         user_states[user_id] += 1
         await ask_next_question(update, user_id)
-        return  # 설문 중이면 GPT 응답 금지
-
-    # 설문 완료 후 GPT 응답
-    profile = user_profiles.get(user_id)
-    if profile:
-        await tutor_response(text, update, profile)
     else:
-        user_states[user_id] = 0
-        user_profiles[user_id] = {}
-        await ask_next_question(update, user_id)
+        if user_id not in user_profiles:
+            user_states[user_id] = 0
+            user_profiles[user_id] = {}
+            await update.message.reply_text("👋 설문부터 시작할게요!")
+            await ask_next_question(update, user_id)
+        else:
+            await tutor_response(text, update, user_profiles[user_id])
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-
-    if user_id not in user_profiles or user_id in user_states:
-        await update.message.reply_text("설문을 먼저 완료해주세요 📝")
-        return  # 설문 도중 음성 입력 차단
+    if user_id not in user_profiles:
+        await update.message.reply_text("👋 설문 먼저 진행해주세요.")
+        user_states[user_id] = 0
+        user_profiles[user_id] = {}
+        await ask_next_question(update, user_id)
+        return
 
     file = await context.bot.get_file(update.message.voice.file_id)
     ogg_path = "voice.ogg"
@@ -116,18 +120,20 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await tutor_response(transcript.text, update, user_profiles[user_id])
 
 async def tutor_response(user_input: str, update: Update, profile: dict):
-    try:
-        system_prompt = get_system_prompt(profile)
-        name = profile.get("name", "회원")
+    user_id = update.effective_user.id
+    user_histories.setdefault(user_id, []).append(user_input)
 
+    try:
+        prompt = get_system_prompt(profile, user_histories[user_id])
         response = openai.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": prompt},
                 {"role": "user", "content": user_input}
             ]
         )
         reply = response.choices[0].message.content
+        user_histories[user_id].append(reply)
         await update.message.reply_text(reply)
 
         speech = openai.audio.speech.create(
@@ -138,18 +144,12 @@ async def tutor_response(user_input: str, update: Update, profile: dict):
         tts_path = "response.mp3"
         with open(tts_path, "wb") as f:
             f.write(speech.content)
-
         await update.message.reply_voice(voice=open(tts_path, "rb"))
-
-        user_id = update.effective_user.id
-        if user_id in user_histories:
-            user_histories[user_id].append({"input": user_input, "reply": reply})
-
     except Exception as e:
         await update.message.reply_text(f"❌ 오류 발생: {str(e)}")
 
 if __name__ == "__main__":
-    app = ApplicationBuilder().token(os.getenv("TELEGRAM_TOKEN")).build()
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
