@@ -8,14 +8,14 @@ from pydub import AudioSegment
 user_profiles = {}
 user_states = {}
 user_histories = {}
-user_topics = {}  # ✅ 현재 학습 중인 주제 저장용
+user_topics = {}
 
 survey_questions = [
     ("native", "🗣 모국어가 무엇인가요? (Your native language)?"),
     ("target", "📘 배우고 싶은 언어는 무엇인가요? (Which language would you like to learn?)"),
     ("age", "📅 나이대가 어떻게 되나요? (What is your age group?)"),
     ("gender", "👤 성별이 어떻게 되시나요? (남성/여성)"),
-    ("level", "📊 현재 실력은 어느정도인가요? (예: 초급, 중급, 고급 또는 설명으로) (Your level: beginner/intermediate/advanced?)")
+    ("level", "📊 현재 실력은 어느정도인가요? (Your level: beginner/intermediate?)")
 ]
 
 language_explanation = {
@@ -27,30 +27,29 @@ language_explanation = {
     "Indonesian": "Tolong jelaskan dalam Bahasa Indonesia."
 }
 
-def get_tone(age, gender):
-    if age == "20대":
-        return "형" if gender == "남성" else "언니"
-    elif age == "30대":
-        return "형" if gender == "남성" else "언니"
-    elif age == "40대":
-        return "형님" if gender == "남성" else "언니"
-    elif age == "50대 이상":
-        return "형님" if gender == "남성" else "선생님"
-    return "형님"
-
 def get_system_prompt(profile):
     explanation = language_explanation.get(profile['native'], "Explain in English.")
-    tone = get_tone(profile['age'], profile['gender'])
-    return f"""
-You are a smart language tutor called CC4AI 튜터.
-The user is a {profile['age']} {profile['gender']}, native language: {profile['native']}, learning: {profile['target']}.
-Explain grammar, expressions and pronunciation in a friendly way using {profile['native']}.
-When the user gives a topic (e.g., computer, travel, food), ask a follow-up question to go deeper (e.g., 'coding', 'hardware').
-Then, based on the subtopic, teach useful English expressions, vocabulary, and pronunciation.
-Give example sentences and encourage the user to repeat them.
-Then, wait for the user’s voice or message.
-Do not only explain the topic, always teach English based on it.
-Keep the conversation flowing naturally.
+    level = profile.get("level", "beginner").lower()
+
+    if "중급" in level or "intermediate" in level:
+        return f"""
+You are a GPT-based smart English tutor.
+Speak slowly and clearly. The learner is intermediate level.
+The native language is {profile['native']}, and the target language is {profile['target']}.
+Use {profile['native']} only for grammar explanations or corrections.
+Start with a topic the learner gives, ask for more context, and then practice realistic English dialogues.
+Correct errors in grammar and pronunciation and give feedback naturally.
+Encourage short conversations or role-play.
+"""
+    else:
+        return f"""
+You are a GPT-based smart English tutor.
+Speak very slowly and clearly. The learner is beginner level.
+Use {profile['native']} for 80% of the explanation, and use {profile['target']} only in short, easy sentences.
+When a topic is given (e.g., travel, computer), break it into subtopics.
+Give 2-3 short example sentences and basic vocabulary with explanation.
+Ask the learner to repeat and give pronunciation feedback.
+Make it interactive and guide them step-by-step.
 """
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -68,7 +67,7 @@ async def ask_next_question(update, user_id):
     else:
         await update.message.reply_text("✅ 설문 완료! 이제 수업을 시작할게요 형님.")
         del user_states[user_id]
-        await update.message.reply_text("무슨 주제로 수업을 시작해볼까요?")  # 학습자 중심 시작
+        await update.message.reply_text("무슨 주제로 수업을 시작해볼까요?")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -118,15 +117,13 @@ async def tutor_response(user_input: str, update: Update, profile: dict):
         if user_id not in user_histories:
             user_histories[user_id] = []
 
-        # ✅ 주제를 기억 (처음 입력 시)
         if user_id not in user_topics:
             user_topics[user_id] = None
 
-        # 주제를 정하지 않았다면, 지금 주제를 저장
-        if user_topics[user_id] is None and len(user_input) < 20:
+        # 주제를 처음 정했을 경우 저장
+        if user_topics[user_id] is None and len(user_input) < 30:
             user_topics[user_id] = user_input
 
-        # GPT 대화 히스토리 구성
         user_histories[user_id].append({"role": "user", "content": user_input})
         history = user_histories[user_id][-10:]
         messages = [{"role": "system", "content": system_prompt}] + history
