@@ -109,6 +109,8 @@ async def tutor_response(user_input: str, update: Update, profile: dict):
     try:
         user_id = update.effective_user.id
         system_prompt = get_system_prompt(profile)
+        if not system_prompt or not isinstance(system_prompt, str):
+            system_prompt = "You are a helpful tutor. Please guide the learner step-by-step."
 
         if user_id not in user_histories:
             user_histories[user_id] = []
@@ -121,7 +123,7 @@ async def tutor_response(user_input: str, update: Update, profile: dict):
             user_topics[user_id] = user_input
 
         user_histories[user_id].append({"role": "user", "content": user_input})
-        history = user_histories[user_id][-10:]
+        history = [msg for msg in user_histories[user_id][-10:] if msg.get("content")]
         messages = [{"role": "system", "content": system_prompt}] + history
 
         response = openai.chat.completions.create(
@@ -156,4 +158,3 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     print("✅ CC4AI 튜터 작동 중")
     app.run_polling()
-
