@@ -159,8 +159,8 @@ async def tutor_response(user_input: str, update: Update, profile: dict, mode: s
             messages.append({
     "role": "user",
     "content": f"The learner said: '{user_input}'. Please carefully analyze the pronunciation word-by-word.
-- '✅ Clear' if the pronunciation is accurate.
-- '⚠️ Needs improvement' if the word was unclear, distorted, or incorrect.
+- ✅ Clear if the pronunciation is accurate.
+- ⚠️ Needs improvement if the word was unclear, distorted, or incorrect.
 Give honest and strict evaluation. If more than 2 words are not clear, ask the learner to try again."
 })
         else:
