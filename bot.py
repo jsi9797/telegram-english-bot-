@@ -131,7 +131,7 @@ async def tutor_response(user_input: str, update: Update, profile: dict):
         history = [msg for msg in user_histories[user_id][-10:] if msg.get("content")]
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Please start an English lesson using the topic '{user_topics[user_id]}'. Start by introducing 5 to 10 vocabulary words in {profile['target']} with translations in {profile['native']}. Present each word clearly, then prompt the learner to repeat them aloud one by one. After that, listen and provide pronunciation feedback. Only after the vocabulary session, move on to example sentences for practice. Maintain all explanations in {profile['native']} and examples in {profile['target']}."}
+            {"role": "user", "content": f"Please start an English lesson using the topic '{user_topics[user_id]}'. Start by introducing 5 to 10 vocabulary words in {profile['target']} with translations in {profile['native']}. Present each word clearly, then prompt the learner to repeat them aloud one by one. After that, listen and provide pronunciation feedback. Only after the vocabulary session, move on to example sentences for practice. For each sentence, provide the English version first, then translate it into the learner's native language ({profile['native']}). Maintain all explanations in {profile['native']} and examples in {profile['target']}."}
         ] + history
 
         response = openai.chat.completions.create(
