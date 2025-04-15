@@ -123,12 +123,16 @@ async def tutor_response(user_input: str, update: Update, profile: dict):
             user_topics[user_id] = None
 
         # 주제를 처음 정했을 경우 저장
-        if user_topics[user_id] is None and any(keyword in user_input.lower() for keyword in ['여행', '컴퓨터', '비즈니스', '코딩', '영어 수업', 'travel', 'computer', 'business', 'coding', 'english lesson']):
+        if user_topics[user_id] is None:
+            user_topics[user_id] = user_input
             user_topics[user_id] = user_input
 
         user_histories[user_id].append({"role": "user", "content": user_input})
         history = [msg for msg in user_histories[user_id][-10:] if msg.get("content")]
-        messages = [{"role": "system", "content": system_prompt}] + history
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"Please start an English lesson using the topic '{user_topics[user_id]}' and provide practice in {profile['target']}, with explanations in {profile['native']}."}
+        ] + history
 
         response = openai.chat.completions.create(
             model="gpt-3.5-turbo",
