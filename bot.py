@@ -80,6 +80,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if profile:
             await tutor_response(text, update, profile)
         else:
+        # Check if user has already completed the survey
         if user_id not in user_profiles or not user_profiles[user_id].get("level"):
             await update.message.reply_text("처음 오셨군요! 설문부터 진행할게요 형님 📝")
             user_states[user_id] = 0
