@@ -69,13 +69,21 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
 
-    if user_id in user_states:
+    # 이미 설문이 완료된 경우 user_states 에 존재하지 않으면 바로 수업 시작
+    if user_id not in user_profiles or not user_profiles[user_id].get("level"):
+        if user_id not in user_states:
+            user_states[user_id] = 0
+            user_profiles[user_id] = {}
+            await update.message.reply_text("👋 설문을 시작합니다! Let's start the survey!")
         state = user_states[user_id]
         key, _ = survey_questions[state]
         user_profiles[user_id][key] = text
         user_states[user_id] += 1
         await ask_next_question(update, user_id)
-    else:
+        return
+
+    # 설문 완료 후 일반 메시지 처리
+    await tutor_response(text, update, user_profiles[user_id])
         profile = user_profiles.get(user_id)
         if profile:
             await tutor_response(text, update, profile)
