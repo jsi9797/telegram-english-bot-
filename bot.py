@@ -90,6 +90,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await tutor_response(text, update, user_profiles[user_id])
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global user_profiles
     user_id = update.effective_user.id
     if user_id not in user_profiles:
         await update.message.reply_text("처음 오셨군요! 설문부터 진행할게요 형님 📝")
@@ -107,6 +108,16 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with open(mp3_path, "rb") as f:
         transcript = openai.audio.transcriptions.create(model="whisper-1", file=f)
 
+    if 'retry_count' not in user_profiles[user_id]:
+        user_profiles[user_id]['retry_count'] = 0
+    if 'last_phrase' not in user_profiles[user_id]:
+        user_profiles[user_id]['last_phrase'] = transcript.text
+
+    if user_profiles[user_id]['retry_count'] >= 2:
+        user_profiles[user_id]['retry_count'] = 0
+        user_profiles[user_id]['last_phrase'] = ''
+    else:
+        user_profiles[user_id]['retry_count'] += 1
     await tutor_response(transcript.text, update, user_profiles[user_id], mode="pronunciation")
 
 async def tutor_response(user_input: str, update: Update, profile: dict, mode: str = None):
@@ -133,7 +144,7 @@ async def tutor_response(user_input: str, update: Update, profile: dict, mode: s
             {"role": "system", "content": system_prompt}
         ]
         if mode == "pronunciation":
-            messages.append({"role": "user", "content": f"The learner said: '{user_input}'. Please give word-level pronunciation feedback and point out unclear sounds."})
+            messages.append({"role": "user", "content": f"The learner said: '{user_input}'. Please give word-level pronunciation feedback and point out unclear sounds. If any words were unclear, ask the learner to try saying the same sentence again."})
         else:
             messages.append({"role": "user", "content": f"Please start an English lesson using the topic '{user_topics[user_id]}'. Start by introducing 5 to 10 vocabulary words in {profile['target']} with translations in {profile['native']}. Present each word clearly, then prompt the learner to repeat them aloud one by one. After that, listen and provide pronunciation feedback. Only after the vocabulary session, move on to example sentences for practice. For each sentence, provide the English version first, then translate it into the learner's native language ({profile['native']}). Maintain all explanations in {profile['native']} and examples in {profile['target']}."})
         messages += history
