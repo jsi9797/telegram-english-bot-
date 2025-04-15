@@ -80,10 +80,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if profile:
             await tutor_response(text, update, profile)
         else:
+        if user_id not in user_profiles or not user_profiles[user_id].get("level"):
             await update.message.reply_text("처음 오셨군요! 설문부터 진행할게요 형님 📝")
             user_states[user_id] = 0
             user_profiles[user_id] = {}
             await ask_next_question(update, user_id)
+        else:
+            await tutor_response(text, update, user_profiles[user_id])
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
