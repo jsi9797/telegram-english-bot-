@@ -84,7 +84,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 설문 완료 후 일반 메시지 처리
     await tutor_response(text, update, user_profiles[user_id])
-        profile = user_profiles.get(user_id)
+    return  # 중복 실행 방지
         if profile:
             await tutor_response(text, update, profile)
         else:
@@ -154,7 +154,7 @@ async def tutor_response(user_input: str, update: Update, profile: dict, mode: s
         if mode == "pronunciation":
             messages.append({"role": "user", "content": f"The learner said: '{user_input}'. Please give word-level pronunciation feedback and point out unclear sounds. If any words were unclear, ask the learner to try saying the same sentence again."})
         else:
-            messages.append({"role": "user", "content": f"Please start an English lesson using the topic '{user_topics[user_id]}'. Start by introducing 5 to 10 vocabulary words in {profile['target']} with translations in {profile['native']}. Present each word clearly, then prompt the learner to repeat them aloud one by one. After that, listen and provide pronunciation feedback. Only after the vocabulary session, move on to example sentences for practice. For each sentence, provide the English version first, then translate it into the learner's native language ({profile['native']}). Maintain all explanations in {profile['native']} and examples in {profile['target']}."})
+            messages.append({"role": "user", "content": f"Please start an English lesson using the topic '{user_topics[user_id]}'. First, introduce 5 to 10 vocabulary words in {profile['target']} with translations in {profile['native']}. Prompt the learner to repeat each word aloud. Wait for pronunciation practice to complete before moving to the next phase. Then, after vocabulary is completed, provide 3 to 5 example sentences related to the topic. For each sentence: 1) Present the English version, 2) Translate it into {profile['native']}, and 3) Ask the learner to repeat the sentence aloud. Only proceed to the next sentence after that. Maintain all explanations in {profile['native']} and examples in {profile['target']}."}). Maintain all explanations in {profile['native']} and examples in {profile['target']}."})
         messages += history
 
         response = openai.chat.completions.create(
