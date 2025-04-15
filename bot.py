@@ -159,9 +159,12 @@ async def tutor_response(user_input: str, update: Update, profile: dict, mode: s
             messages.append({
     "role": "user",
     "content": f"The learner said: '{user_input}'. Please carefully analyze the pronunciation word-by-word.
-- ✅ Clear if the pronunciation is accurate.
-- ⚠️ Needs improvement if the word was unclear, distorted, or incorrect.
-Give honest and strict evaluation. If more than 2 words are not clear, ask the learner to try again."
+"
+               "- ✅ Clear if the pronunciation is accurate.
+"
+               "- ⚠️ Needs improvement if the word was unclear, distorted, or incorrect.
+"
+               "Give honest and strict evaluation. If more than 2 words are not clear, ask the learner to try again."
 })
         else:
             messages.append({"role": "user", "content": f"Please start an English lesson using the topic '{user_topics[user_id]}'. First, introduce 5 to 10 vocabulary words in {profile['target']} with translations in {profile['native']}. After listing the vocabulary, say: '각 단어를 읽어보시고 준비가 되면 녹음하여 전송 해주세요.' Do not include additional instructions or explanations. After the learner finishes reading and pronouncing all vocabulary words, then and only then, continue by providing 3 to 5 example sentences related to the topic. For each sentence: 1) Present the English version, 2) Translate it into {profile['native']}, and 3) Ask the learner to repeat the sentence aloud. Wait for the learner’s response before presenting the next sentence. Maintain all explanations in {profile['native']} and examples in {profile['target']}."})
