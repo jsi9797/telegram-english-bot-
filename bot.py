@@ -1,3 +1,9 @@
+import os
+import openai
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+import requests
+from pydub import AudioSegment
 async def tutor_response(user_input: str, update: Update, profile: dict, mode: str = None):
     try:
         user_id = update.effective_user.id
