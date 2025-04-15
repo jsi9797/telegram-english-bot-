@@ -107,9 +107,9 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with open(mp3_path, "rb") as f:
         transcript = openai.audio.transcriptions.create(model="whisper-1", file=f)
 
-    await tutor_response(transcript.text, update, user_profiles[user_id])
+    await tutor_response(transcript.text, update, user_profiles[user_id], mode="pronunciation")
 
-async def tutor_response(user_input: str, update: Update, profile: dict):
+async def tutor_response(user_input: str, update: Update, profile: dict, mode: str = None):
     try:
         user_id = update.effective_user.id
         system_prompt = get_system_prompt(profile)
@@ -130,9 +130,13 @@ async def tutor_response(user_input: str, update: Update, profile: dict):
         user_histories[user_id].append({"role": "user", "content": user_input})
         history = [msg for msg in user_histories[user_id][-10:] if msg.get("content")]
         messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Please start an English lesson using the topic '{user_topics[user_id]}'. Start by introducing 5 to 10 vocabulary words in {profile['target']} with translations in {profile['native']}. Present each word clearly, then prompt the learner to repeat them aloud one by one. After that, listen and provide pronunciation feedback. Only after the vocabulary session, move on to example sentences for practice. For each sentence, provide the English version first, then translate it into the learner's native language ({profile['native']}). Maintain all explanations in {profile['native']} and examples in {profile['target']}."}
-        ] + history
+            {"role": "system", "content": system_prompt}
+        ]
+        if mode == "pronunciation":
+            messages.append({"role": "user", "content": f"The learner said: '{user_input}'. Please give word-level pronunciation feedback and point out unclear sounds."})
+        else:
+            messages.append({"role": "user", "content": f"Please start an English lesson using the topic '{user_topics[user_id]}'. Start by introducing 5 to 10 vocabulary words in {profile['target']} with translations in {profile['native']}. Present each word clearly, then prompt the learner to repeat them aloud one by one. After that, listen and provide pronunciation feedback. Only after the vocabulary session, move on to example sentences for practice. For each sentence, provide the English version first, then translate it into the learner's native language ({profile['native']}). Maintain all explanations in {profile['native']} and examples in {profile['target']}."})
+        messages += history
 
         response = openai.chat.completions.create(
             model="gpt-3.5-turbo",
