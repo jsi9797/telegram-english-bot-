@@ -27,25 +27,21 @@ language_explanation = {
     "Indonesian": "Tolong jelaskan dalam Bahasa Indonesia."
 }
 
-def get_system_prompt(profile):  # 💡 Modified to reflect level-based instruction language handling
+def get_system_prompt(profile):
     explanation = language_explanation.get(profile['native'], "Explain in English.")
     level = profile.get("level", "beginner").lower()
-
-    if "중급" in level or "intermediate" in level:
-        return f"""
+    return f"""
 You are a GPT-based smart English tutor.
-Speak very slowly and clearly. The learner is beginner level.
-Use {profile['native']} to explain most of the content and instructions, but provide all English examples and practice in {profile['target']}.
-Deliver all practice content in {profile['target']} and provide supportive explanation in {profile['native']} when necessary to aid understanding.
-When a topic is given (e.g., travel, computer), break it into subtopics.
-For each example sentence:
-- Provide the English sentence.
-- Translate it into the learner's native language.
-- Explain key vocabulary with meaning in the native language.
-- Ask the learner to repeat the sentence aloud.
-- After listening, give pronunciation and grammar feedback.
-After the learner finishes 3-4 sentences, ask them a question that allows them to use the learned expressions in a short, creative response. Guide the learner to practice and build confidence.
-Make it interactive and guide them step-by-step.
+Speak slowly and clearly. The learner is {level} level.
+Use {profile['native']} to explain, but give examples in {profile['target']}.
+Teach step-by-step: 
+1. First, introduce 5-10 vocabulary words with {profile['native']} meaning.
+2. Prompt user to repeat each word aloud. Wait for their audio.
+3. Give pronunciation feedback.
+4. When pronunciation is complete, continue to 3-5 example sentences.
+5. Present English sentence, then native translation, then ask learner to repeat aloud.
+6. Give pronunciation and grammar feedback after each sentence.
+Make learning interactive and natural.
 """
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -69,7 +65,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
 
-    # 이미 설문이 완료된 경우 user_states 에 존재하지 않으면 바로 수업 시작
     if user_id not in user_profiles or not user_profiles[user_id].get("level"):
         if user_id not in user_states:
             user_states[user_id] = 0
@@ -82,12 +77,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await ask_next_question(update, user_id)
         return
 
-    # 설문 완료 후 일반 메시지 처리
     await tutor_response(text, update, user_profiles[user_id])
-    return  # 중복 실행 방지
+    return
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global user_profiles
     user_id = update.effective_user.id
     if user_id not in user_profiles:
         await update.message.reply_text("처음 오셨군요! 설문부터 진행할게요 형님 📝")
@@ -113,13 +106,9 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_profiles[user_id]['retry_count'] >= 2:
         user_profiles[user_id]['retry_count'] = 0
         user_profiles[user_id]['last_phrase'] = ''
+        user_profiles[user_id]['vocab_phase'] = False
     else:
         user_profiles[user_id]['retry_count'] += 1
-        # 발음 완료 시 문장 학습으로 전환
-    if user_profiles[user_id]['retry_count'] >= 2:
-        user_profiles[user_id]['retry_count'] = 0
-        user_profiles[user_id]['last_phrase'] = ''
-        user_profiles[user_id]['vocab_phase'] = False
 
     await tutor_response(transcript.text, update, user_profiles[user_id], mode="pronunciation")
 
@@ -127,44 +116,37 @@ async def tutor_response(user_input: str, update: Update, profile: dict, mode: s
     try:
         user_id = update.effective_user.id
         system_prompt = get_system_prompt(profile)
-        if not system_prompt or not isinstance(system_prompt, str):
-            system_prompt = "You are a helpful tutor. Please guide the learner step-by-step."
 
         if user_id not in user_histories:
             user_histories[user_id] = []
-
         if user_id not in user_topics:
             user_topics[user_id] = None
 
-        # 주제를 처음 정했을 경우 저장
         if user_topics[user_id] is None:
             user_topics[user_id] = user_input
 
         user_histories[user_id].append({"role": "user", "content": user_input})
 
-        # 단어와 문장이 섞이지 않도록 제어
         if 'vocab_phase' not in user_profiles[user_id]:
             user_profiles[user_id]['vocab_phase'] = True
 
-        if user_profiles[user_id]['vocab_phase'] and mode != "pronunciation":
-            messages.append({"role": "user", "content": f"Please start an English lesson using the topic '{user_topics[user_id]}'. First, introduce 5 to 10 vocabulary words in {profile['target']} with translations in {profile['native']}. After listing the vocabulary, say: '각 단어를 읽어보시고 준비가 되면 녹음하여 전송 해주세요.' Do not include additional instructions or explanations. Do not continue to example sentences until the learner finishes the pronunciation step."})
-        elif not user_profiles[user_id]['vocab_phase'] and mode != "pronunciation":
-            messages.append({"role": "user", "content": f"Now continue the lesson by providing 3 to 5 example sentences related to the topic '{user_topics[user_id]}'. For each sentence: 1) Present the English version, 2) Translate it into {profile['native']}, and 3) Ask the learner to repeat the sentence aloud. Wait for the learner’s response before presenting the next sentence."})
-
         history = [msg for msg in user_histories[user_id][-10:] if msg.get("content")]
-        messages = [
-            {"role": "system", "content": system_prompt}
-        ]
-if mode == "pronunciation":
-    messages.append({
-        "role": "user",
-        "content": f"The learner said: '{user_input}'. Please carefully analyze the pronunciation word-by-word.\n"
-                   "- ✅ Clear if the pronunciation is accurate.\n"
-                   "- ⚠️ Needs improvement if the word was unclear, distorted, or incorrect.\n"
-                   "Give honest and strict evaluation. If more than 2 words are not clear, ask the learner to try again."
-})
+        messages = [{"role": "system", "content": system_prompt}]
+
+        if mode == "pronunciation":
+            messages.append({
+                "role": "user",
+                "content": f"The learner said: '{user_input}'. Please carefully analyze the pronunciation word-by-word.\n"
+                           "✅ Clear if the pronunciation is accurate.\n"
+                           "⚠️ Needs improvement if the word was unclear, distorted, or incorrect.\n"
+                           "Give honest and strict evaluation. If more than 2 words are not clear, ask the learner to try again."
+            })
         else:
-            messages.append({"role": "user", "content": f"Please start an English lesson using the topic '{user_topics[user_id]}'. First, introduce 5 to 10 vocabulary words in {profile['target']} with translations in {profile['native']}. After listing the vocabulary, say: '각 단어를 읽어보시고 준비가 되면 녹음하여 전송 해주세요.' Do not include additional instructions or explanations. After the learner finishes reading and pronouncing all vocabulary words, then and only then, continue by providing 3 to 5 example sentences related to the topic. For each sentence: 1) Present the English version, 2) Translate it into {profile['native']}, and 3) Ask the learner to repeat the sentence aloud. Wait for the learner’s response before presenting the next sentence. Maintain all explanations in {profile['native']} and examples in {profile['target']}."})
+            if user_profiles[user_id]['vocab_phase']:
+                messages.append({"role": "user", "content": f"Please start an English lesson using the topic '{user_topics[user_id]}'. First, introduce 5 to 10 vocabulary words in {profile['target']} with translations in {profile['native']']}. After listing the vocabulary, say: '각 단어를 읽어보시고 준비가 되면 녹음하여 전송 해주세요.' Do not continue to example sentences until the learner completes pronunciation."})
+            else:
+                messages.append({"role": "user", "content": f"Now continue the lesson by providing 3 to 5 example sentences related to the topic '{user_topics[user_id]}'. For each sentence: 1) Present the English version, 2) Translate it into {profile['native']}, and 3) Ask the learner to repeat the sentence aloud. Wait for the learner’s response before presenting the next sentence."})
+
         messages += history
 
         response = openai.chat.completions.create(
@@ -174,7 +156,6 @@ if mode == "pronunciation":
 
         reply = response.choices[0].message.content
         user_histories[user_id].append({"role": "assistant", "content": reply})
-
         await update.message.reply_text(reply)
 
         speech = openai.audio.speech.create(
@@ -185,7 +166,6 @@ if mode == "pronunciation":
         tts_path = "response.mp3"
         with open(tts_path, "wb") as f:
             f.write(speech.content)
-
         await update.message.reply_voice(voice=open(tts_path, "rb"))
 
     except Exception as e:
