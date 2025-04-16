@@ -30,28 +30,26 @@ language_explanation = {
 }
 
 def get_system_prompt(profile):
-    explanation = language_explanation.get(profile['native'], "Explain in English.")
     level = profile.get("level", "beginner").lower()
-    return f'''
+    return f"""
 You are a GPT-based smart English tutor.
-Speak slowly and clearly. The learner is {level} level.
-Use {profile['native']} to explain, but give examples in {profile['target']}.
-Teach step-by-step:
-When a topic is given:
-1. First, generate a list of 3-5 simple example sentences related to the topic in {profile['target']}.
-2. For each sentence, present:
-   - English sentence
-   - Translation in {profile['native']}
-   - Vocabulary explanation
-   - Then say: "이 문장을 한번 따라 말해보고, 준비가 되면 녹음하여 전송해주세요!"
-Wait for the learner to speak, then give pronunciation feedback.
-After feedback, move to the next sentence. Repeat until done.
-'''
+The learner is {level} level.
+Use {profile['native']} for explanations and {profile['target']} for all English examples.
+Step-by-step:
+- Generate 3-5 simple sentences on the topic '{user_topics.get(profile['user_id'], 'travel')}'
+- For each sentence, include:
+   1. English version
+   2. Translation in {profile['native']}
+   3. Vocabulary explanation
+   4. End with: "이 문장을 한번 따라 말해보고, 준비가 되면 녹음하여 전송해주세요!"
+Wait for the learner's recording and provide pronunciation feedback.
+Then go to the next sentence.
+"""
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    user_states[user_id] = 0
     user_profiles[user_id] = {}
+    user_states[user_id] = 0
     await update.message.reply_text("👋 설문을 시작합니다! Let's start the survey!")
     await ask_next_question(update, user_id)
 
@@ -69,11 +67,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
 
-    if user_id not in user_profiles or not user_profiles[user_id].get("level"):
+    if user_id not in user_profiles or "level" not in user_profiles[user_id]:
         if user_id not in user_states:
-            user_states[user_id] = 0
             user_profiles[user_id] = {}
-            await update.message.reply_text("👋 설문을 시작합니다! Let's start the survey!")
+            user_states[user_id] = 0
         state = user_states[user_id]
         key, _ = survey_questions[state]
         user_profiles[user_id][key] = text
@@ -87,29 +84,26 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def generate_sentences(update, user_id):
     profile = user_profiles[user_id]
+    profile["user_id"] = user_id
     system_prompt = get_system_prompt(profile)
 
     response = openai.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Please create 3 example sentences for the topic '{user_topics[user_id]}' with translations and explanations."}
+            {"role": "user", "content": f"Please provide 3 short example sentences for the topic '{user_topics[user_id]}'."}
         ]
     )
 
     content = response.choices[0].message.content
-    user_sentences[user_id] = content.split("
-
-")  # 나눠서 저장
+    user_sentences[user_id] = content.split("\n\n")  # ✅ 오류 수정됨
     await present_sentence(update, user_id)
 
 async def present_sentence(update, user_id):
-    index = user_sentence_index[user_id]
+    index = user_sentence_index.get(user_id, 0)
     sentences = user_sentences.get(user_id, [])
     if index < len(sentences):
-        msg = f"{sentences[index]}
-
-🗣 이 문장을 한번 따라 말해보고, 준비가 되면 녹음하여 전송해주세요!"
+        msg = f"{sentences[index]}\n\n🗣 이 문장을 한번 따라 말해보고, 준비가 되면 녹음하여 전송해주세요!"
         await update.message.reply_text(msg)
     else:
         await update.message.reply_text("👍 오늘의 문장을 모두 연습했어요! 수고하셨습니다.")
@@ -117,9 +111,9 @@ async def present_sentence(update, user_id):
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in user_profiles:
-        await update.message.reply_text("처음 오셨군요! 설문부터 시작할게요 📝")
-        user_states[user_id] = 0
+        await update.message.reply_text("처음 오셨군요! 설문부터 진행할게요 📝")
         user_profiles[user_id] = {}
+        user_states[user_id] = 0
         await ask_next_question(update, user_id)
         return
 
@@ -135,20 +129,18 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await pronunciation_feedback(update, user_id, transcript.text)
 
 async def pronunciation_feedback(update, user_id, text):
-    profile = user_profiles[user_id]
     sentence = user_sentences[user_id][user_sentence_index[user_id]]
     messages = [
-        {"role": "system", "content": "You are an English tutor specialized in pronunciation feedback."},
-        {"role": "user", "content": f"The learner said: '{text}'. Please give detailed pronunciation feedback based on the target sentence: {sentence}"}
+        {"role": "system", "content": "You are a pronunciation coach."},
+        {"role": "user", "content": f"The learner said: '{text}'. Please analyze their pronunciation based on this target sentence: '{sentence}'."}
     ]
     response = openai.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=messages
     )
     feedback = response.choices[0].message.content
-    await update.message.reply_text(f"📣 피드백: {feedback}")
+    await update.message.reply_text(f"📣 발음 피드백: {feedback}")
 
-    # 다음 문장 진행
     user_sentence_index[user_id] += 1
     await present_sentence(update, user_id)
 
