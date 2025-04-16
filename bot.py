@@ -78,7 +78,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await tutor_response(text, update, user_profiles[user_id])
-    return
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -121,7 +120,6 @@ async def tutor_response(user_input: str, update: Update, profile: dict, mode: s
             user_histories[user_id] = []
         if user_id not in user_topics:
             user_topics[user_id] = None
-
         if user_topics[user_id] is None:
             user_topics[user_id] = user_input
 
@@ -130,8 +128,9 @@ async def tutor_response(user_input: str, update: Update, profile: dict, mode: s
         if 'vocab_phase' not in user_profiles[user_id]:
             user_profiles[user_id]['vocab_phase'] = True
 
-        history = [msg for msg in user_histories[user_id][-10:] if msg.get("content")]
         messages = [{"role": "system", "content": system_prompt}]
+        history = [msg for msg in user_histories[user_id][-10:] if msg.get("content")]
+        messages += history
 
         if mode == "pronunciation":
             messages.append({
@@ -141,13 +140,21 @@ async def tutor_response(user_input: str, update: Update, profile: dict, mode: s
                            "⚠️ Needs improvement if the word was unclear, distorted, or incorrect.\n"
                            "Give honest and strict evaluation. If more than 2 words are not clear, ask the learner to try again."
             })
+        elif user_profiles[user_id]['vocab_phase']:
+            messages.append({
+                "role": "user",
+                "content": f"Please start an English lesson using the topic '{user_topics[user_id]}'. "
+                           f"First, introduce 5 to 10 vocabulary words in {profile['target']} with translations in {profile['native']}. "
+                           "After listing the vocabulary, say: '각 단어를 읽어보시고 준비가 되면 녹음하여 전송 해주세요.' "
+                           "Do not continue to example sentences until the learner completes pronunciation."
+            })
         else:
-            if user_profiles[user_id]['vocab_phase']:
-                messages.append({"role": "user", "content": f"Please start an English lesson using the topic '{user_topics[user_id]}'. First, introduce 5 to 10 vocabulary words in {profile['target']} with translations in {profile['native']']}. After listing the vocabulary, say: '각 단어를 읽어보시고 준비가 되면 녹음하여 전송 해주세요.' Do not continue to example sentences until the learner completes pronunciation."})
-            else:
-                messages.append({"role": "user", "content": f"Now continue the lesson by providing 3 to 5 example sentences related to the topic '{user_topics[user_id]}'. For each sentence: 1) Present the English version, 2) Translate it into {profile['native']}, and 3) Ask the learner to repeat the sentence aloud. Wait for the learner’s response before presenting the next sentence."})
-
-        messages += history
+            messages.append({
+                "role": "user",
+                "content": f"Now continue the lesson by providing 3 to 5 example sentences related to the topic '{user_topics[user_id]}'. "
+                           f"For each sentence: 1) Present the English version, 2) Translate it into {profile['native']}, "
+                           "and 3) Ask the learner to repeat the sentence aloud. Wait for the learner’s response before presenting the next sentence."
+            })
 
         response = openai.chat.completions.create(
             model="gpt-3.5-turbo",
