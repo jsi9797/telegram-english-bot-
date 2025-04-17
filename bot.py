@@ -2,13 +2,13 @@ import os
 import openai
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
-import requests
 from pydub import AudioSegment
 
 user_profiles = {}
 user_states = {}
 user_histories = {}
 user_topics = {}
+user_vocab_done = {}
 user_sentences = {}
 user_sentence_index = {}
 
@@ -20,36 +20,10 @@ survey_questions = [
     ("level", "📊 현재 실력은 어느정도인가요? (Your level: beginner/intermediate?)")
 ]
 
-language_explanation = {
-    "Korean": "설명은 한국어로 해주세요.",
-    "Japanese": "説明は日本語でお願いします。",
-    "Spanish": "Explica en español, por favor.",
-    "Vietnamese": "Giải thích bằng tiếng Việt giúp tôi.",
-    "Chinese": "请用中文解释。",
-    "Indonesian": "Tolong jelaskan dalam Bahasa Indonesia."
-}
-
-def get_system_prompt(profile):
-    level = profile.get("level", "beginner").lower()
-    return f"""
-You are a GPT-based smart English tutor.
-The learner is {level} level.
-Use {profile['native']} for explanations and {profile['target']} for all English examples.
-Step-by-step:
-- Generate 3-5 simple sentences on the topic '{user_topics.get(profile['user_id'], 'travel')}'
-- For each sentence, include:
-   1. English version
-   2. Translation in {profile['native']}
-   3. Vocabulary explanation
-   4. End with: "이 문장을 한번 따라 말해보고, 준비가 되면 녹음하여 전송해주세요!"
-Wait for the learner's recording and provide pronunciation feedback.
-Then go to the next sentence.
-"""
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    user_profiles[user_id] = {}
     user_states[user_id] = 0
+    user_profiles[user_id] = {}
     await update.message.reply_text("👋 설문을 시작합니다! Let's start the survey!")
     await ask_next_question(update, user_id)
 
@@ -59,18 +33,19 @@ async def ask_next_question(update, user_id):
         key, question = survey_questions[state]
         await update.message.reply_text(question)
     else:
-        await update.message.reply_text("✅ 설문 완료! 이제 수업을 시작할게요.")
         del user_states[user_id]
+        await update.message.reply_text("✅ 설문 완료! 이제 수업을 시작할게요 형님.")
         await update.message.reply_text("무슨 주제로 수업을 시작해볼까요?")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
 
-    if user_id not in user_profiles or "level" not in user_profiles[user_id]:
+    if user_id not in user_profiles or not user_profiles[user_id].get("level"):
         if user_id not in user_states:
-            user_profiles[user_id] = {}
             user_states[user_id] = 0
+            user_profiles[user_id] = {}
+            await update.message.reply_text("👋 설문을 시작합니다! Let's start the survey!")
         state = user_states[user_id]
         key, _ = survey_questions[state]
         user_profiles[user_id][key] = text
@@ -78,44 +53,39 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await ask_next_question(update, user_id)
         return
 
-    user_topics[user_id] = text
-    user_sentence_index[user_id] = 0
-    await generate_sentences(update, user_id)
+    if user_id not in user_topics:
+        user_topics[user_id] = text
+        await update.message.reply_text("🧠 단어 학습부터 시작할게요. 아래 단어들을 따라 읽어보세요:")
 
-async def generate_sentences(update, user_id):
-    profile = user_profiles[user_id]
-    profile["user_id"] = user_id
-    system_prompt = get_system_prompt(profile)
-
-    response = openai.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Please provide 3 short example sentences for the topic '{user_topics[user_id]}'."}
+        vocab_list = [
+            ("computer", "컴퓨터"),
+            ("internet", "인터넷"),
+            ("keyboard", "키보드"),
+            ("monitor", "모니터"),
+            ("email", "이메일")
         ]
-    )
+        user_profiles[user_id]["vocab_list"] = vocab_list
+        user_vocab_done[user_id] = False
+        user_sentence_index[user_id] = 0
+        user_sentences[user_id] = [
+            ("I use my computer to browse the internet.", "인터넷을 둘러보기 위해서 컴퓨터를 사용해요."),
+            ("I need a keyboard and a mouse to type.", "타이핑을 하려면 키보드와 마우스가 필요해요."),
+            ("The monitor is too bright.", "모니터가 너무 밝아요."),
+            ("I received an important email this morning.", "오늘 아침에 중요한 이메일을 받았어요.")
+        ]
 
-    content = response.choices[0].message.content
-    user_sentences[user_id] = content.split("\n\n")  # ✅ 오류 수정됨
-    await present_sentence(update, user_id)
+        for en, ko in vocab_list:
+            await update.message.reply_text(f"{en} - {ko}")
+        await update.message.reply_text("🗣 각 단어를 읽어보시고 준비가 되면 녹음하여 전송해주세요.")
+        return
 
-async def present_sentence(update, user_id):
-    index = user_sentence_index.get(user_id, 0)
-    sentences = user_sentences.get(user_id, [])
-    if index < len(sentences):
-        msg = f"{sentences[index]}\n\n🗣 이 문장을 한번 따라 말해보고, 준비가 되면 녹음하여 전송해주세요!"
-        await update.message.reply_text(msg)
+    if user_vocab_done.get(user_id, False):
+        await update.message.reply_text("🎯 이미 단어 학습이 완료되었습니다. 문장 발음을 들려주세요!")
     else:
-        await update.message.reply_text("👍 오늘의 문장을 모두 연습했어요! 수고하셨습니다.")
+        await update.message.reply_text("📚 단어 발음 먼저 완료해주세요!")
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id not in user_profiles:
-        await update.message.reply_text("처음 오셨군요! 설문부터 진행할게요 📝")
-        user_profiles[user_id] = {}
-        user_states[user_id] = 0
-        await ask_next_question(update, user_id)
-        return
 
     file = await context.bot.get_file(update.message.voice.file_id)
     ogg_path = "voice.ogg"
@@ -125,24 +95,40 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     with open(mp3_path, "rb") as f:
         transcript = openai.audio.transcriptions.create(model="whisper-1", file=f)
+    text = transcript.text
 
-    await pronunciation_feedback(update, user_id, transcript.text)
+    if not user_vocab_done.get(user_id, False):
+        user_vocab_done[user_id] = True
+        await update.message.reply_text("✅ 단어 발음 확인 완료! 이제 문장 학습으로 넘어갈게요.")
+        await send_next_sentence(update, user_id)
+    else:
+        await evaluate_sentence(update, user_id, text)
 
-async def pronunciation_feedback(update, user_id, text):
-    sentence = user_sentences[user_id][user_sentence_index[user_id]]
-    messages = [
-        {"role": "system", "content": "You are a pronunciation coach."},
-        {"role": "user", "content": f"The learner said: '{text}'. Please analyze their pronunciation based on this target sentence: '{sentence}'."}
-    ]
-    response = openai.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=messages
-    )
-    feedback = response.choices[0].message.content
-    await update.message.reply_text(f"📣 발음 피드백: {feedback}")
+async def send_next_sentence(update, user_id):
+    idx = user_sentence_index[user_id]
+    if idx < len(user_sentences[user_id]):
+        en, ko = user_sentences[user_id][idx]
+        await update.message.reply_text(f"📝 문장 {idx+1}: {en}
+한국어: {ko}")
+        await update.message.reply_text("이 문장을 한번 따라 말해보고, 준비가 되면 녹음하여 전송해주세요!")
+    else:
+        await update.message.reply_text("🎉 수업이 끝났습니다! 다음에 또 만나요.")
 
+async def evaluate_sentence(update, user_id, user_text):
+    idx = user_sentence_index[user_id]
+    target_en, _ = user_sentences[user_id][idx]
     user_sentence_index[user_id] += 1
-    await present_sentence(update, user_id)
+
+    messages = [
+        {"role": "system", "content": "You are an English pronunciation evaluator. Give clear, brief feedback."},
+        {"role": "user", "content": f"The learner tried to say: '{user_text}'\nThe target sentence was: '{target_en}'\nPlease give pronunciation tips in Korean and encourage retry only if really needed."}
+    ]
+
+    response = openai.chat.completions.create(model="gpt-3.5-turbo", messages=messages)
+    reply = response.choices[0].message.content
+    await update.message.reply_text(reply)
+
+    await send_next_sentence(update, user_id)
 
 if __name__ == "__main__":
     openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -152,3 +138,4 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     print("✅ CC4AI 튜터 작동 중")
     app.run_polling()
+
