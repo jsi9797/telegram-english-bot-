@@ -9,6 +9,8 @@ user_states = {}
 user_histories = {}
 user_topics = {}
 user_phases = {}
+user_sentences = {}
+user_sentence_index = {}
 
 survey_questions = [
     ("native", "🗣 모국어가 무엇인가요? (Your native language)?"),
@@ -66,7 +68,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("설문부터 먼저 진행해주세요! /start")
         return
 
-    # 설문 완료 후 주제 설정
     if user_phases.get(user_id) == "waiting_topic":
         user_topics[user_id] = text
         user_histories[user_id] = []
@@ -129,7 +130,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if phase == "vocab":
         await generate_sentences(update, user_id)
     else:
-        await update.message.reply_text("다음 문장으로 넘어갈게요!\n🗣 이 문장을 한번 따라 말해보고, 준비가 되면 녹음하여 전송해주세요!")
+        await update.message.reply_text("🗣 다음 문장으로 넘어갈게요! 문장을 따라 말해보고, 준비가 되면 녹음해서 보내주세요!")
 
 async def generate_sentences(update, user_id):
     profile = user_profiles[user_id]
