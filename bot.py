@@ -9,8 +9,11 @@ user_states = {}
 user_histories = {}
 user_topics = {}
 user_phases = {}
-user_sentences = {}
-user_sentence_index = {}
+vocab_feedback_round = {}
+current_vocab_list = {}
+current_vocab_index = {}
+sentence_index = {}
+sentence_list = {}
 
 survey_questions = [
     ("native", "🗣 모국어가 무엇인가요? (Your native language)?"),
@@ -25,14 +28,15 @@ def get_system_prompt(profile):
     return f"""
 You are a friendly, patient English tutor. The learner is {level} level.
 Use {profile['native']} to explain and {profile['target']} to teach examples.
-Begin by presenting 5 to 7 topic-related vocabulary words with their {profile['native']} meaning.
-Ask the learner to repeat the words aloud and wait for pronunciation recording.
-Provide simple, clear pronunciation feedback like: "computer: good", "monitor: say again: monitor, monitor".
-Only after words are practiced, present one English sentence at a time:
-- Show the English sentence + native translation
-- Ask the learner to repeat it aloud
-- After their voice, give pronunciation feedback
-Keep the lesson interactive and in simple steps.
+1. Begin with 10 vocabulary words related to the topic '{user_topics.get(profile['user_id'], 'hobby')}'
+2. Present them in two sets of 5. Wait for user audio and give simple feedback like:
+   computer: good / painting: say again: painting, painting
+3. Only after all words are practiced correctly, present 3 sentences, one at a time.
+4. Each sentence includes:
+   - English
+   - {profile['native']} translation
+   - Prompt: "이 문장을 따라 말해보고, 준비가 되면 녹음해서 보내주세요!"
+5. Wait for user voice, then provide simple sentence-level pronunciation feedback.
 """
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -56,7 +60,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
 
-    if user_id in user_states:  # 설문 중
+    if user_id in user_states:
         state = user_states[user_id]
         key, _ = survey_questions[state]
         user_profiles[user_id][key] = text
@@ -65,38 +69,44 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if user_id not in user_profiles or "level" not in user_profiles[user_id]:
-        await update.message.reply_text("설문부터 먼저 진행해주세요! /start")
+        await update.message.reply_text("설문을 먼저 완료해주세요! /start")
         return
 
     if user_phases.get(user_id) == "waiting_topic":
         user_topics[user_id] = text
-        user_histories[user_id] = []
         user_phases[user_id] = "vocab"
+        current_vocab_index[user_id] = 0
+        vocab_feedback_round[user_id] = 0
         await generate_vocab(update, user_id)
     else:
-        await update.message.reply_text("음성으로 단어를 따라 말해주시고, 발음 피드백을 받은 후 문장 학습으로 넘어가요!")
+        await update.message.reply_text("🎙 먼저 단어를 연습하고 피드백을 받아야 문장으로 넘어갈 수 있어요!")
 
 async def generate_vocab(update, user_id):
     profile = user_profiles[user_id]
+    profile["user_id"] = user_id
     system_prompt = get_system_prompt(profile)
 
     response = openai.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Please provide 5 to 7 vocabulary words related to the topic '{user_topics[user_id]}'. Format: 영어단어 - 한국어의미"}
+            {"role": "user", "content": f"Please give me 10 vocabulary words related to the topic '{user_topics[user_id]}'. Format: word - native meaning"}
         ]
     )
+
     vocab_text = response.choices[0].message.content
-    user_histories[user_id] = [{"role": "assistant", "content": vocab_text}]
-    await update.message.reply_text("📘 단어들을 하나씩 따라 말해볼까요?\n\n" + vocab_text + "\n\n🗣 위 단어들을 따라 말해보고, 준비가 되면 녹음해서 보내주세요!")
+    vocab_lines = [line.strip() for line in vocab_text.split("\n") if line.strip()]
+    current_vocab_list[user_id] = vocab_lines
+    await send_vocab_set(update, user_id)
+
+async def send_vocab_set(update, user_id):
+    index = current_vocab_index[user_id]
+    vocab_set = current_vocab_list[user_id][index:index+5]
+    numbered = [f"{i+1}. {word}" for i, word in enumerate(vocab_set)]
+    await update.message.reply_text("📘 단어들을 하나씩 따라 말해볼까요?\n\n" + "\n".join(numbered) + "\n\n🗣 따라 말해보고, 준비가 되면 녹음해서 보내주세요!")
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id not in user_profiles or "level" not in user_profiles[user_id]:
-        await update.message.reply_text("먼저 설문을 완료해주세요! /start")
-        return
-
     file = await context.bot.get_file(update.message.voice.file_id)
     ogg_path = "voice.ogg"
     mp3_path = "voice.mp3"
@@ -105,32 +115,43 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     with open(mp3_path, "rb") as f:
         transcript = openai.audio.transcriptions.create(model="whisper-1", file=f)
-
     user_input = transcript.text
-    profile = user_profiles[user_id]
+
     phase = user_phases.get(user_id, "vocab")
 
     if phase == "vocab":
-        prompt = f"The learner said: {user_input}. Please check their pronunciation for each word. Give simple feedback like:\ncomputer: good\nmonitor: say again: monitor, monitor"
-        user_phases[user_id] = "sentence"
-        await update.message.reply_text("🔍 발음 피드백을 드릴게요!")
-    else:
-        prompt = f"The learner said: {user_input}. Please give simple pronunciation feedback on the sentence they tried to say."
+        await handle_vocab_pronunciation(update, user_id, user_input)
+    elif phase == "sentence":
+        await handle_sentence_pronunciation(update, user_id, user_input)
+
+async def handle_vocab_pronunciation(update, user_id, text):
+    vocab_set = current_vocab_list[user_id][current_vocab_index[user_id]:current_vocab_index[user_id]+5]
+    words = [line.split("-")[0].strip() for line in vocab_set]
+    prompt = f"The learner said: {text}. Please give simple word-by-word pronunciation feedback ONLY using English vocabulary words like:\ncomputer: good\nmonitor: say again: monitor, monitor\nUse only these words: {', '.join(words)}"
 
     response = openai.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[
-            {"role": "system", "content": "You are a pronunciation tutor for beginner learners."},
+            {"role": "system", "content": "You are a pronunciation tutor for beginners. Keep feedback short and simple."},
             {"role": "user", "content": prompt}
         ]
     )
+
     feedback = response.choices[0].message.content
     await update.message.reply_text("📣 발음 피드백:\n" + feedback)
 
-    if phase == "vocab":
-        await generate_sentences(update, user_id)
+    if "say again" in feedback and vocab_feedback_round[user_id] < 1:
+        vocab_feedback_round[user_id] += 1
+        await update.message.reply_text("🎯 틀린 단어를 다시 한 번 따라 말해보세요! 제가 다시 확인해드릴게요.")
     else:
-        await update.message.reply_text("🗣 다음 문장으로 넘어갈게요! 문장을 따라 말해보고, 준비가 되면 녹음해서 보내주세요!")
+        current_vocab_index[user_id] += 5
+        vocab_feedback_round[user_id] = 0
+        if current_vocab_index[user_id] >= 10:
+            user_phases[user_id] = "sentence"
+            sentence_index[user_id] = 0
+            await generate_sentences(update, user_id)
+        else:
+            await send_vocab_set(update, user_id)
 
 async def generate_sentences(update, user_id):
     profile = user_profiles[user_id]
@@ -140,13 +161,37 @@ async def generate_sentences(update, user_id):
         model="gpt-3.5-turbo",
         messages=[
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Now please provide 3 example sentences about '{user_topics[user_id]}'. Format: 1. 영어 문장\n한국어 해석"}
+            {"role": "user", "content": f"Please provide 3 simple English sentences about '{user_topics[user_id]}'. Each with translation in {profile['native']}. Format: 1. ENGLISH\nNATIVE" }
+        ]
+    )
+
+    sentences = [s for s in response.choices[0].message.content.split("\n") if s.strip()]
+    sentence_list[user_id] = sentences
+    await send_next_sentence(update, user_id)
+
+async def send_next_sentence(update, user_id):
+    idx = sentence_index.get(user_id, 0)
+    if idx < len(sentence_list[user_id]):
+        await update.message.reply_text(f"🗣 문장 {idx+1}번입니다:\n{sentence_list[user_id][idx]}\n\n🎙 이 문장을 따라 말해보고, 준비되면 녹음해서 보내주세요!")
+    else:
+        await update.message.reply_text("🎉 오늘의 문장 연습을 모두 마쳤어요! 정말 잘하셨어요!")
+
+async def handle_sentence_pronunciation(update, user_id, text):
+    sentence = sentence_list[user_id][sentence_index[user_id]]
+    prompt = f"The learner said: {text}. Target sentence: '{sentence}'. Give short, simple feedback for beginners. Highlight mispronounced words, and say them twice like: 'travel, travel'."
+
+    response = openai.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role": "system", "content": "You are a pronunciation tutor for beginners. Feedback must be short and clear."},
+            {"role": "user", "content": prompt}
         ]
     )
 
     reply = response.choices[0].message.content
-    user_histories[user_id].append({"role": "assistant", "content": reply})
-    await update.message.reply_text("📗 이제 문장 연습으로 넘어갈게요!\n\n" + reply + "\n\n🗣 각 문장을 따라 말해보고, 준비되면 하나씩 녹음해서 보내주세요!")
+    await update.message.reply_text("🗣 발음 피드백:\n" + reply)
+    sentence_index[user_id] += 1
+    await send_next_sentence(update, user_id)
 
 if __name__ == "__main__":
     openai.api_key = os.getenv("OPENAI_API_KEY")
